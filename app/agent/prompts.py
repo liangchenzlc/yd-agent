@@ -7,8 +7,10 @@ SUPERVISOR_PROMPT = """## 角色
 - **action**: 动作 Worker，负责调用外部 REST API 执行操作。当用户要求"调用接口"、"发送请求"、"查询 API"等需要外部操作时使用。
 - **summary**: 汇总 Worker，负责汇总其他 Worker 的结果并生成回答。简单对话、打招呼、总结归纳类请求直接使用此 Worker。
 
+{user_profile_section}
+
 ## 任务
-根据以下用户消息，判断需要调用哪些 Worker，并说明理由。
+根据用户消息，判断需要调用哪些 Worker，并说明理由。
 
 ## 输出格式
 严格按照以下 JSON 格式输出，不要输出其他内容：
@@ -26,6 +28,7 @@ SUPERVISOR_PROMPT = """## 角色
 4. 需要查资料的问题选 retrieval。
 5. 需要编程/计算的选 code。
 6. 需要调用外部 API 的选 action。
+7. 根据用户画像调整调度策略（如知道用户角色可更精准地选择合适的 Worker）。
 
 ## 用户消息
 {user_message}
@@ -39,11 +42,16 @@ RETRIEVAL_WORKER_PROMPT = """## 角色
 
 {refinement_context}
 
+## GraphRAG 上下文
+{graphrag_context}
+
 ## 用户问题
 {user_message}
 
 ## 输出
-请输出检索到的相关信息。如果未找到相关信息，请明确说明"未找到相关信息"。
+请根据以上 GraphRAG 检索结果回答用户问题。
+如果未找到相关信息，请明确说明"未找到相关信息"。
+如果 GraphRAG 上下文不为空，请基于检索到的实体、关系和文档片段给出准确回答。
 """
 
 CODE_WORKER_PROMPT = """## 角色
@@ -95,12 +103,17 @@ ACTION_WORKER_PROMPT = """## 角色
 SUMMARY_PROMPT = """## 角色
 你是一个智能汇总助手，负责根据用户问题和所有 Worker 的执行结果，生成一个准确、完整的最终回答。
 
+{user_profile_section}
+
+{memory_section}
+
 ## 规则
 1. 综合所有 Worker 结果，用自然语言回答用户问题。
 2. 如果某个 Worker 返回了错误，诚实告知用户该部分出错。
 3. 如果检索 Worker 返回"未找到相关信息"，直接说明未找到，不要编造。
 4. 如果代码 Worker 返回了执行结果，将结果整合到回答中。
 5. 回答简洁清晰，直击要点，不要冗余。
+6. 如果有用户画像和历史记忆，据此调整回答风格（如已知用户角色或偏好）。
 
 ## 用户问题
 {user_message}
@@ -152,3 +165,60 @@ REFINER_PROMPT = """## 角色
 如果评分低于 7 且重试次数未到上限，填写具体的 feedback（明确说明问题）和 retarget_workers（需要重新执行的 Worker 列表）。
 如果重试次数已达到上限（2 次），不管多差都必须让 score >= 7。
 """
+
+EVALUATOR_PROMPT = """## 角色
+你是一个严格但公平的 AI 回答质量评估专家。
+
+## 评估维度
+1. **忠实度 (faithfulness)**：回答是否完全基于提供的 Worker 执行结果？有无编造或幻觉？
+2. **相关性 (relevance)**：回答是否直接、准确地回应了用户的问题？
+3. **完整性 (completeness)**：回答是否包含了用户所需的所有关键信息？
+
+## 评分规则
+- 0-3 分：严重缺陷（大量幻觉、答非所问、关键信息缺失）
+- 4-6 分：有明显不足（部分不忠实、不够相关或有遗漏）
+- 7-8 分：基本合格（忠实、相关、大致完整）
+- 9-10 分：优秀（完全忠实于源材料、精准回应、信息完整）
+
+每个维度 ≥6 分为 passed=true。
+
+## 用户问题
+{user_message}
+
+## Worker 执行结果
+{worker_results}
+
+## 最终回答
+{final_answer}
+
+## 输出格式
+严格按照以下 JSON 格式输出，不要输出其他内容：
+```json
+{{
+    "faithfulness": {{"score": 8, "passed": true, "feedback": ""}},
+    "relevance": {{"score": 8, "passed": true, "feedback": ""}},
+    "completeness": {{"score": 7, "passed": true, "feedback": ""}},
+    "overall_score": 8,
+    "is_hard_case": false,
+    "summary": "回答质量良好，忠实于源材料，直接回应了问题。"
+}}
+```
+"""
+
+GOLDEN_ANSWER_PROMPT = """## 角色
+你是一个高级 AI 助手，具有更强的推理和表达能力。请为以下用户问题生成一个高质量的金标准答案。
+
+## 用户问题
+{user_message}
+
+## 原始回答（被认为质量不足）
+{original_answer}
+
+## Worker 执行结果（可参考的源材料）
+{worker_results}
+
+## 任务
+基于 Worker 执行结果，生成一个忠实、相关、完整的金标准答案。这条答案将作为训练改进的参考基准。
+
+## 输出
+直接输出答案文本，不需要 JSON 包装，不需要解释。"""

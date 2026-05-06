@@ -23,19 +23,28 @@ class FakeLLM:
             self._responses = list(responses)
         self._call_count = 0
 
-    def invoke(self, prompt: str):
+    async def ainvoke(self, prompt: str | list):
+        return self.invoke(prompt)
+
+    def invoke(self, prompt: str | list):
         idx = self._call_count
         self._call_count += 1
 
         if idx < len(self._responses) and self._responses[idx] is not None:
             return _FakeResponse(self._responses[idx])
 
-        # 回退：根据 prompt 特征自动判断
-        return _FakeResponse(self._fallback(prompt))
+        # 提取文本用于 fallback 判断
+        text = prompt
+        if isinstance(prompt, list):
+            text = " ".join(m.get("content", "") if isinstance(m, dict) else str(m) for m in prompt)
+
+        return _FakeResponse(self._fallback(text))
 
     def _fallback(self, prompt: str) -> str:
         if "score" in prompt and "faithfulness" in prompt:
             return REFINER_PASS_JSON
+        if "实体" in prompt and "关系" in prompt:
+            return '```json\n{"entities": [{"name": "AI", "type": "concept", "description": "人工智能"}], "relationships": []}\n```'
         if "Python 代码" in prompt and "用户需求" in prompt:
             return CODE_OUTPUT
         if "API 调用" in prompt and "method" in prompt:
@@ -58,7 +67,7 @@ def fake_run_code_error(code: str, timeout: int | None = None) -> SandboxResult:
     return SandboxResult(stdout="", stderr="NameError: name 'x' is not defined", exit_code=1, timed_out=False)
 
 
-def make_initial_state(message: str) -> AgentState:
+def make_initial_state(message: str, user_id: str = "default") -> AgentState:
     """创建一个初始 AgentState 用于测试。"""
     return AgentState(
         messages=[HumanMessage(content=message)],
@@ -70,4 +79,8 @@ def make_initial_state(message: str) -> AgentState:
         refinement_feedback="",
         refinement_targets=[],
         final_answer="",
+        user_id=user_id,
+        user_profile={},
+        relevant_memories=[],
+        session_history=[],
     )

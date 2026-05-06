@@ -20,3 +20,19 @@ class RefinerError(AgentError):
 
 class ActionError(AgentError):
     """Action Worker API 调用失败"""
+
+
+class StorageError(AgentError):
+    """存储层操作失败"""
+
+
+class IngestionError(AgentError):
+    """文档摄入管道失败"""
+
+
+class MemoryError(AgentError):
+    """记忆操作失败"""
+
+
+class EvalError(AgentError):
+    """Eval 评估操作失败"""

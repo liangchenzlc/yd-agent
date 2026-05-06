@@ -1,6 +1,7 @@
 from app.agent.state import AgentState
 from app.agent.prompts import SUMMARY_PROMPT
 from app.agent.llm import factory as llm_factory
+from app.agent.memory.retriever import format_memory_context, format_profile_context
 
 
 def summary_worker_node(state: AgentState) -> dict:
@@ -24,7 +25,16 @@ def summary_worker_node(state: AgentState) -> dict:
     else:
         results_text = "[无 Worker 执行结果，请直接回答用户问题]"
 
-    prompt = SUMMARY_PROMPT.replace("{user_message}", user_message).replace("{worker_results}", results_text)
+    # 注入用户画像和记忆上下文
+    user_profile_section = format_profile_context(state.get("user_profile", {}))
+    memory_section = format_memory_context(state.get("relevant_memories", []))
+
+    prompt = (
+        SUMMARY_PROMPT.replace("{user_profile_section}", user_profile_section)
+        .replace("{memory_section}", memory_section)
+        .replace("{user_message}", user_message)
+        .replace("{worker_results}", results_text)
+    )
     response = llm.invoke(prompt)
     final_answer = response.content if hasattr(response, "content") else str(response)
 

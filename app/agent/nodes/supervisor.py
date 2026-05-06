@@ -5,6 +5,7 @@ from app.agent.state import AgentState
 from app.agent.prompts import SUPERVISOR_PROMPT
 from app.agent.llm import factory as llm_factory
 from app.agent.constants import ALL_WORKERS
+from app.agent.memory.retriever import format_profile_context
 
 
 def _parse_supervisor_output(raw: str, user_message: str) -> tuple[list[str], str]:
@@ -47,7 +48,11 @@ def supervisor_node(state: AgentState) -> dict:
     messages = state.get("messages", [])
     user_message = messages[-1].content if messages else ""
 
-    prompt = SUPERVISOR_PROMPT.replace("{user_message}", user_message)
+    user_profile_section = format_profile_context(state.get("user_profile", {}))
+    prompt = (
+        SUPERVISOR_PROMPT.replace("{user_profile_section}", user_profile_section)
+        .replace("{user_message}", user_message)
+    )
     response = llm.invoke(prompt)
     raw = response.content if hasattr(response, "content") else str(response)
 
