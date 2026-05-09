@@ -23,7 +23,7 @@ def mock_deps(mgr):
         mock.patch("app.main.get_storage_manager", return_value=mgr),
         mock.patch("app.api.routes.documents.create_embeddings", return_value=FakeEmbeddings()),
         # extract_entities 中模块级 import create_llm，需 patch 其引用
-        mock.patch("app.agent.ingestion.extractor.create_llm", return_value=mock_llm),
+        mock.patch("app.agent.llm.factory.create_llm", return_value=mock_llm),
     ):
         yield
 

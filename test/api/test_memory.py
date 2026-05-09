@@ -16,8 +16,9 @@ class TestMemoryManager:
     @pytest.fixture
     def mem_mgr(self, tmp_path):
         from app.agent.memory.memory_manager import MemoryManager
+        import asyncio
         mgr = MemoryManager(str(tmp_path), embedding_dim=128)
-        mgr.initialize()
+        asyncio.run(mgr.initialize())
         return mgr
 
     def test_default_profile(self, mem_mgr):
@@ -160,7 +161,7 @@ class TestExtractor:
         from app.agent.memory.extractor import extract_memories_from_conversation
         from test.mock_utils import FakeLLM
 
-        with mock.patch("app.agent.memory.extractor.create_llm") as m:
+        with mock.patch("app.agent.llm.factory.create_llm") as m:
             m.return_value = FakeLLM(responses=[
                 '```json\n{"memories": [{"type": "fact", "content": "测试记忆", "importance": 0.8, "category": ""}]}\n```'
             ])
@@ -174,7 +175,7 @@ class TestExtractor:
         from app.agent.memory.extractor import extract_memories_from_conversation
         from test.mock_utils import FakeLLM
 
-        with mock.patch("app.agent.memory.extractor.create_llm") as m:
+        with mock.patch("app.agent.llm.factory.create_llm") as m:
             m.return_value = FakeLLM(responses=[
                 '```json\n{"memories": []}\n```'
             ])
@@ -186,7 +187,7 @@ class TestExtractor:
         from app.agent.memory.extractor import extract_memories_from_conversation
         from test.mock_utils import FakeLLM
 
-        with mock.patch("app.agent.memory.extractor.create_llm") as m:
+        with mock.patch("app.agent.llm.factory.create_llm") as m:
             m.return_value = FakeLLM(responses=["这不是 JSON"])
             memories = extract_memories_from_conversation("你好", "你好！")
             assert memories == []
@@ -305,13 +306,10 @@ class TestChatMemoryIntegration:
         chat._agent_graph = None  # reset
         chat.get_graph(memory_manager=mem_mgr)
 
-        # 额外 mock extractor 的 create_llm（它使用模块级 import，不会被 mock_llm fixture 拦截）
-        with mock.patch("app.agent.memory.extractor.create_llm") as m_ext:
-            m_ext.return_value = mock_llm.return_value
-            with mock.patch("app.main.get_memory_manager") as m:
-                m.return_value = mem_mgr
-                with TestClient(app) as c:
-                    yield c
+        with mock.patch("app.main.get_memory_manager") as m:
+            m.return_value = mem_mgr
+            with TestClient(app) as c:
+                yield c
 
         asyncio.run(mem_mgr.finalize())
 

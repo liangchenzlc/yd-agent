@@ -23,7 +23,8 @@ yd-Agent/
 │   │   └── settings.py                 # Pydantic Settings（新增 embedding、storage 配置）
 │   ├── domain/
 │   │   ├── __init__.py
-│   │   └── schemas.py                  # 请求/响应模型（新增 Document 相关模型）
+│   │   ├── llm_output.py               # 结构化输出 Pydantic 模型（7 个）
+│   │   └── schemas.py                  # 请求/响应模型（对话/文档/记忆/评估）
 │   ├── api/
 │   │   ├── __init__.py
 │   │   └── routes/
@@ -78,11 +79,18 @@ yd-Agent/
 │       │   ├── supervisor.py          # Supervisor 节点
 │       │   ├── retrieval_worker.py    # 检索 Worker（升级为 GraphRAG）
 │       │   ├── code_worker.py         # 代码 Worker
-│       │   ├── action_worker.py       # 动作 Worker
+│       │   ├── docs_worker.py         # 文档 Worker（替换 action_worker）
 │       │   ├── summary_worker.py      # 汇总 Worker（注入 user_profile + memory context）
 │       │   ├── refiner.py             # Refiner 节点
 │       │   ├── load_memory.py         # 三期新增：加载用户画像和记忆节点
 │       │   └── save_memory.py         # 三期新增：提取和存储记忆节点
+│       ├── tools/                     # 工具包（全 Worker 共享）
+│       │   ├── __init__.py
+│       │   ├── base.py                 # BaseTool + ToolRegistry
+│       │   ├── bash_tool.py            # BashTool：本地命令执行（用户确认）
+│       │   ├── code_tool.py            # CodeTool：Docker 沙箱代码执行
+│       │   ├── search_tool.py          # SearchTool：GraphRAG 三路检索
+│       │   └── doc_tool.py             # DocTool：文档写入
 │       └── sandbox/
 │           ├── __init__.py
 │           └── docker_sandbox.py      # Docker 代码沙箱
@@ -96,8 +104,8 @@ yd-Agent/
         ├── test_chat.py                # 对话接口测试
         ├── test_documents.py           # 新增：文档管理 API 测试（9 个用例）
         ├── test_graphrag.py            # 新增：GraphRAG 组件测试（9 个用例）
-        ├── test_memory.py               # 三期新增：记忆系统测试（23 个用例）
-        └── test_eval.py                 # 四期新增：评估系统测试（26 个用例）
+        ├── test_memory.py               # 三期新增：记忆系统测试（23 个用例，全通过）
+        └── test_eval.py                 # 四期新增：评估系统测试（26 个用例，全通过）
 ```
 
 ## 文件用途说明
@@ -117,6 +125,7 @@ yd-Agent/
 | `main.py` | FastAPI 应用工厂；lifespan 中初始化 `StorageManager`、`MemoryManager`、`EvalManager` 并注入图；启动 eval 后台维护任务 |
 | `config/settings.py` | Pydantic Settings；二期新增 embedding/storage；三期新增记忆配置；四期新增 eval 配置（`eval_enabled` 等） |
 | `domain/schemas.py` | 对话/文档/记忆/评估模型；四期新增 EvalRunItem、HardCaseItem、FeedbackRequest 等 9 个模型 |
+| `domain/llm_output.py` | 7 个结构化输出 Pydantic 模型：SupervisorOutput、RefinerOutput、MemoryExtractionOutput、EvaluationOutput、KeywordOutput、EntityExtractionOutput |
 | `api/routes/documents.py` | 文档管理 API：`POST /documents/ingest`、`GET /documents/stats`、`GET /documents`、`DELETE /documents/{doc_id}` |
 | `api/routes/memory.py` | 三期新增：记忆管理 API：`GET /memory/{user_id}`、`DELETE /memory/{user_id}`、`GET /profile/{user_id}` |
 | `api/routes/eval.py` | 四期新增：评估与反馈 API（10 个端点）：评估摘要/运行记录/难例管理/用户反馈 |
@@ -186,7 +195,13 @@ yd-Agent/
 | `nodes/load_memory.py` | 三期新增：加载用户画像和相关记忆注入 AgentState |
 | `nodes/save_memory.py` | 三期新增：从对话中提取记忆、过滤重要性、存储并更新画像 |
 | `nodes/retrieval_worker.py` | 升级为 GraphRAG 检索：关键词提取→三路搜索→上下文构建→LLM 回答；无文档时回退 LLM-only |
-| `llm/factory.py` | 新增 `create_embeddings()`：创建 `OpenAIEmbeddings` 实例 |
+| `nodes/docs_worker.py` | 文档 Worker：LLM 生成文档内容，通过 DocTool 写入文件 |
+| `llm/factory.py` | `create_llm()` / `create_embeddings()`：LLM 与 Embedding 工厂方法 |
+| `tools/base.py` | `BaseTool` 抽象基类 + `ToolRegistry`：注册/获取/初始化全部工具 |
+| `tools/bash_tool.py` | `BashTool`：执行本地 shell 命令，支持用户确认回调 |
+| `tools/code_tool.py` | `CodeTool`：封装 Docker 沙箱 `run_code()`，返回结构化结果 |
+| `tools/search_tool.py` | `SearchTool`：完整检索管道（关键词→三路搜索→加权选块→上下文构建） |
+| `tools/doc_tool.py` | `DocTool`：将文档写入 `./docs/` 目录，自动创建子目录 |
 
 ### 测试 (`test/`)
 

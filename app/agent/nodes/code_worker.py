@@ -3,8 +3,8 @@ import re
 from app.agent.state import AgentState
 from app.agent.prompts import CODE_WORKER_PROMPT
 from app.agent.llm import factory as llm_factory
-from app.agent.sandbox import docker_sandbox
 from app.agent.constants import WORKER_CODE
+from app.agent.tools import ToolRegistry
 
 
 def _extract_code(raw: str) -> str:
@@ -19,7 +19,7 @@ def _extract_code(raw: str) -> str:
 
 
 def code_worker_node(state: AgentState) -> dict:
-    """代码 Worker：LLM 生成代码 → Docker 沙箱执行。"""
+    """代码 Worker：LLM 生成代码 → CodeTool 沙箱执行。"""
     llm = llm_factory.create_llm()
     messages = state.get("messages", [])
     user_message = messages[-1].content if messages else ""
@@ -36,19 +36,15 @@ def code_worker_node(state: AgentState) -> dict:
 
     code = _extract_code(raw)
 
-    try:
-        result = docker_sandbox.run_code(code)
-        if result.exit_code != 0:
-            content = f"[代码执行错误]\n{result.stderr}"
-            error = result.stderr
-        else:
-            content = result.stdout.strip() or "[代码执行完成，无输出]"
-            error = None
-        metadata = {"exit_code": result.exit_code, "timed_out": result.timed_out}
-    except docker_sandbox.SandboxError as e:
-        content = f"[沙箱错误] {e}"
-        error = str(e)
-        metadata = {"exit_code": -1, "timed_out": False}
+    code_tool = ToolRegistry.get("code")
+    result = code_tool.run(code=code)
+
+    if result.get("success"):
+        content = result.get("stdout", "") or "[代码执行完成，无输出]"
+        error = None
+    else:
+        content = f"[代码执行错误]\n{result.get('stderr', result.get('error', ''))}"
+        error = result.get("stderr") or result.get("error")
 
     return {
         "worker_results": [
@@ -56,7 +52,10 @@ def code_worker_node(state: AgentState) -> dict:
                 "worker": WORKER_CODE,
                 "content": content,
                 "error": error,
-                "metadata": metadata,
+                "metadata": {
+                    "exit_code": result.get("exit_code", -1),
+                    "timed_out": result.get("timed_out", False),
+                },
             }
         ]
     }

@@ -42,20 +42,13 @@ class TestChunker:
 
 class TestKeywordExtraction:
     def test_extract_keywords(self, mock_llm):
-        # 针对模块级 import，patch 目标模块的引用
-        with mock.patch("app.agent.retrieval.keywords.create_llm") as m:
-            from test.mock_utils import FakeLLM
-            m.return_value = FakeLLM()
-            result = extract_keywords("LangGraph 中的 Supervisor 是如何工作的？")
+        result = extract_keywords("LangGraph 中的 Supervisor 是如何工作的？")
         assert isinstance(result, dict)
         assert "ll_keywords" in result
         assert "hl_keywords" in result
 
     def test_extract_keywords_empty(self, mock_llm):
-        with mock.patch("app.agent.retrieval.keywords.create_llm") as m:
-            from test.mock_utils import FakeLLM
-            m.return_value = FakeLLM()
-            result = extract_keywords("")
+        result = extract_keywords("")
         assert isinstance(result, dict)
 
 

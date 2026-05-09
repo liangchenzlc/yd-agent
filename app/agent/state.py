@@ -25,7 +25,6 @@ class AgentState(TypedDict):
     refinement_targets: list[str]  # 需要重新调度的 Worker
     final_answer: str  # 最终回答
 
-    # 三期记忆
     user_id: str  # 用户标识
     user_profile: dict  # 用户画像（load_memory 后填充）
     relevant_memories: list[dict]  # 相关历史记忆

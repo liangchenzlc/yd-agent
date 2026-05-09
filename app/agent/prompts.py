@@ -4,7 +4,7 @@ SUPERVISOR_PROMPT = """## 角色
 ## 可用的 Worker
 - **retrieval**: 知识检索 Worker，负责搜索相关文档和信息。当用户问"是什么"、"怎么做的"、"介绍一下"等知识类问题时使用。
 - **code**: 代码执行 Worker，负责编写和执行 Python 代码。当用户要求"计算"、"分析数据"、"运行代码"、"画图"等需要编程的任务时使用。
-- **action**: 动作 Worker，负责调用外部 REST API 执行操作。当用户要求"调用接口"、"发送请求"、"查询 API"等需要外部操作时使用。
+- **docs**: 文档编写 Worker，负责生成技术文档并写入文件。当用户要求"写文档"、"生成文档"、"记录"等需要编写文档的任务时使用。
 - **summary**: 汇总 Worker，负责汇总其他 Worker 的结果并生成回答。简单对话、打招呼、总结归纳类请求直接使用此 Worker。
 
 {user_profile_section}
@@ -12,22 +12,13 @@ SUPERVISOR_PROMPT = """## 角色
 ## 任务
 根据用户消息，判断需要调用哪些 Worker，并说明理由。
 
-## 输出格式
-严格按照以下 JSON 格式输出，不要输出其他内容：
-```json
-{
-    "workers": ["summary"],
-    "reasoning": "用户简单问候，直接由 summary Worker 回答即可"
-}
-```
-
 ## 规则
 1. workers 数组至少包含一个 Worker。
 2. 如果多个 Worker 可以并行执行（互不依赖），同时选中它们。
 3. 简单聊天、问候、总结类请求只选 summary。
 4. 需要查资料的问题选 retrieval。
 5. 需要编程/计算的选 code。
-6. 需要调用外部 API 的选 action。
+6. 需要编写技术文档的选 docs。
 7. 根据用户画像调整调度策略（如知道用户角色可更精准地选择合适的 Worker）。
 
 ## 用户消息
@@ -77,27 +68,19 @@ CODE_WORKER_PROMPT = """## 角色
 请只输出 Python 代码块。
 """
 
-ACTION_WORKER_PROMPT = """## 角色
-你是一个 API 调用助手，负责根据用户需求构造并执行 REST API 调用。
+DOCS_WORKER_PROMPT = """## 角色
+你是一个技术文档编写助手，负责根据用户需求生成规范的技术文档。
 
 ## 任务
-根据用户需求，确定需要调用的 API 方法和参数。
+根据用户需求，生成格式清晰、内容完整的技术文档。
 
 {refinement_context}
 
 ## 用户需求
 {user_message}
 
-## 输出格式
-严格按照以下 JSON 格式输出 API 调用规格：
-```json
-{
-    "method": "GET",
-    "url": "https://api.example.com/endpoint",
-    "headers": {"Content-Type": "application/json"},
-    "body": {}
-}
-```
+## 输出
+直接输出文档内容，使用 Markdown 格式。内容必须完整，包含必要的标题、说明、代码示例等。
 """
 
 SUMMARY_PROMPT = """## 角色
@@ -148,22 +131,10 @@ REFINER_PROMPT = """## 角色
 ## 已重试次数
 {refinement_count} / 2
 
-## 输出格式
-严格按照以下 JSON 格式输出：
-```json
-{
-    "score": 8,
-    "faithfulness": true,
-    "relevance": true,
-    "completeness": true,
-    "feedback": "",
-    "retarget_workers": []
-}
-```
-
-如果评分为 7 或以上，说明回答合格，feedback 和 retarget_workers 留空。
-如果评分低于 7 且重试次数未到上限，填写具体的 feedback（明确说明问题）和 retarget_workers（需要重新执行的 Worker 列表）。
-如果重试次数已达到上限（2 次），不管多差都必须让 score >= 7。
+## 规则
+- 如果评分为 7 或以上，说明回答合格。
+- 如果评分低于 7 且重试次数未到上限，填写具体的反馈和需要重新执行的 Worker 列表。
+- 如果重试次数已达到上限（2 次），不管多差都必须让 score >= 7。
 """
 
 EVALUATOR_PROMPT = """## 角色
@@ -190,19 +161,6 @@ EVALUATOR_PROMPT = """## 角色
 
 ## 最终回答
 {final_answer}
-
-## 输出格式
-严格按照以下 JSON 格式输出，不要输出其他内容：
-```json
-{{
-    "faithfulness": {{"score": 8, "passed": true, "feedback": ""}},
-    "relevance": {{"score": 8, "passed": true, "feedback": ""}},
-    "completeness": {{"score": 7, "passed": true, "feedback": ""}},
-    "overall_score": 8,
-    "is_hard_case": false,
-    "summary": "回答质量良好，忠实于源材料，直接回应了问题。"
-}}
-```
 """
 
 GOLDEN_ANSWER_PROMPT = """## 角色

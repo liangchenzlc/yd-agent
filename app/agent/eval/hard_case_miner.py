@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from app.agent.llm.factory import create_llm
+from app.agent.llm import factory as llm_factory
 from app.agent.prompts import GOLDEN_ANSWER_PROMPT
 
 
@@ -38,7 +38,7 @@ async def generate_golden_answer(
     )
 
     try:
-        llm = create_llm(temperature=0, model=golden_model)
+        llm = llm_factory.create_llm(temperature=0, model=golden_model)
         response = await llm.ainvoke(prompt)
         return response.content if hasattr(response, "content") else str(response)
     except Exception:

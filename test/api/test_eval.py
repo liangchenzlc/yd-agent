@@ -325,26 +325,24 @@ class TestEvalIntegration:
             '```json\n{"faithfulness":{"score":8,"passed":true,"feedback":""},"relevance":{"score":7,"passed":true,"feedback":""},"completeness":{"score":6,"passed":true,"feedback":""},"overall_score":7,"is_hard_case":false,"summary":"good"}\n```'
         ]
 
-        with mock.patch("app.agent.eval.evaluator.create_llm") as m_eval:
+        with mock.patch("app.agent.llm.factory.create_llm") as m_eval:
             m_eval.return_value = fake_llm
-            with mock.patch("app.agent.eval.hard_case_miner.create_llm") as m_miner:
-                m_miner.return_value = fake_llm
-                with tempfile.TemporaryDirectory() as tmpdir:
-                    mgr = EvalManager(str(tmpdir))
-                    await mgr.initialize()
+            with tempfile.TemporaryDirectory() as tmpdir:
+                mgr = EvalManager(str(tmpdir))
+                await mgr.initialize()
 
-                    with mock.patch("app.main.get_eval_manager") as m:
-                        m.return_value = mgr
-                        req = ChatRequest(message="hello", user_id="u1")
-                        task = _trigger_eval(req, {"final_answer": "hi"}, [])
-                        assert task is not None
-                        await task
-                        # 验证 eval run 已存储
-                        summary = await mgr.get_eval_summary()
-                        assert summary["total_eval_runs"] == 1
-                        assert summary["avg_score"] > 0
+                with mock.patch("app.main.get_eval_manager") as m:
+                    m.return_value = mgr
+                    req = ChatRequest(message="hello", user_id="u1")
+                    task = _trigger_eval(req, {"final_answer": "hi"}, [])
+                    assert task is not None
+                    await task
+                    # 验证 eval run 已存储
+                    summary = await mgr.get_eval_summary()
+                    assert summary["total_eval_runs"] == 1
+                    assert summary["avg_score"] > 0
 
-                    await mgr.finalize()
+                await mgr.finalize()
 
     def test_trigger_eval_disabled(self, mock_llm):
         """_trigger_eval 在 eval 禁用时应返回 None。"""

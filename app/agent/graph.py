@@ -7,19 +7,20 @@ from app.agent.state import AgentState
 from app.agent.nodes.supervisor import supervisor_node
 from app.agent.nodes.retrieval_worker import retrieval_worker_node
 from app.agent.nodes.code_worker import code_worker_node
-from app.agent.nodes.action_worker import action_worker_node
+from app.agent.nodes.docs_worker import docs_worker_node
 from app.agent.nodes.summary_worker import summary_worker_node
 from app.agent.nodes.refiner import refiner_node
 from app.agent.nodes.load_memory import load_memory_node
 from app.agent.nodes.save_memory import save_memory_node
 from app.agent.storage_manager import StorageManager
 from app.agent.memory.memory_manager import MemoryManager
+from app.agent.tools import ToolRegistry
 
 # Worker 名称 → 图节点名称 映射
 WORKER_NODE_MAP = {
     "retrieval": "retrieval_worker",
     "code": "code_worker",
-    "action": "action_worker",
+    "docs": "docs_worker",
     "summary": "summary_worker",
 }
 
@@ -49,6 +50,9 @@ def build_agent_graph(
         storage_manager: 可选的存储管理器实例，用于 GraphRAG 检索。
         memory_manager: 可选的记忆管理器实例，用于用户记忆的加载和存储。
     """
+    # 初始化工具注册表
+    ToolRegistry.init_defaults()
+
     builder = StateGraph(AgentState)
 
     # 注册所有节点
@@ -56,7 +60,7 @@ def build_agent_graph(
     builder.add_node("supervisor", supervisor_node)
     builder.add_node("retrieval_worker", partial(retrieval_worker_node, storage_manager=storage_manager))
     builder.add_node("code_worker", code_worker_node)
-    builder.add_node("action_worker", action_worker_node)
+    builder.add_node("docs_worker", docs_worker_node)
     builder.add_node("summary_worker", summary_worker_node)
     builder.add_node("refiner", refiner_node)
     builder.add_node("save_memory", partial(save_memory_node, memory_manager=memory_manager))
@@ -71,7 +75,7 @@ def build_agent_graph(
     # 所有 Worker → 汇总 Worker
     builder.add_edge("retrieval_worker", "summary_worker")
     builder.add_edge("code_worker", "summary_worker")
-    builder.add_edge("action_worker", "summary_worker")
+    builder.add_edge("docs_worker", "summary_worker")
     builder.add_edge("summary_worker", "refiner")
 
     # Refiner → 条件路由（重试或保存记忆）
