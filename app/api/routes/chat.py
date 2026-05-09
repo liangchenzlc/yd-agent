@@ -115,7 +115,7 @@ async def chat_stream(req: ChatRequest):
                         refinement_count = node_output.get("refinement_count", refinement_count)
                         yield f"data: {json.dumps({'type': 'refiner', 'score': 7 if not refinement_needed else 5, 'passed': not refinement_needed})}\n\n"
 
-                    elif node_name in ("retrieval_worker", "code_worker", "action_worker"):
+                    elif node_name in ("retrieval_worker", "code_worker", "docs_worker"):
                         for r in node_output.get("worker_results", []):
                             worker_results_list.append(r)
                             yield f"data: {json.dumps({'type': 'worker_start', 'worker': r.get('worker', node_name)})}\n\n"

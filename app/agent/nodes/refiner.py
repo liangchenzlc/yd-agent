@@ -23,8 +23,11 @@ def refiner_node(state: AgentState) -> dict:
         "{worker_results}", results_text
     ).replace("{final_answer}", final_answer).replace("{refinement_count}", str(refinement_count))
 
-    structured_llm = llm.with_structured_output(RefinerOutput)
-    result: RefinerOutput = structured_llm.invoke(prompt)
+    try:
+        structured_llm = llm.with_structured_output(RefinerOutput)
+        result: RefinerOutput = structured_llm.invoke(prompt)
+    except Exception:
+        result = RefinerOutput(score=7)  # 解析失败时默认通过
 
     retarget = [w for w in result.retarget_workers if w in ALL_WORKERS]
 

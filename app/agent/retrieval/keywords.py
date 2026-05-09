@@ -13,6 +13,9 @@ KEYWORD_EXTRACTION_PROMPT = """## 角色
 {user_message}
 
 如果问题很短或没有明确的实体，相应数组可以为空。
+
+## 输出格式
+请以 JSON 格式输出。
 """
 
 

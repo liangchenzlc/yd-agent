@@ -1,38 +1,15 @@
-"""测试文档管理 API：摄入、统计、列出、删除。"""
-
-from unittest import mock
+"""测试文档管理 API：摄入、统计、列出、删除（真实存储 + 真实 Embedding/LLM）。"""
 
 import pytest
+from fastapi.testclient import TestClient
 
-from app.agent.storage_manager import StorageManager
-from test.conftest import FakeEmbeddings
-
-
-@pytest.fixture
-def mgr():
-    return StorageManager("/tmp/yd-agent-test", embedding_dim=128)
+from app.main import app
 
 
 @pytest.fixture
-def mock_deps(mgr):
-    """Mock 文档 API 依赖的所有外部调用（存储、LLM、Embedding）。"""
-    from test.mock_utils import FakeLLM
-
-    mock_llm = FakeLLM()
-    with (
-        mock.patch("app.main.get_storage_manager", return_value=mgr),
-        mock.patch("app.api.routes.documents.create_embeddings", return_value=FakeEmbeddings()),
-        # extract_entities 中模块级 import create_llm，需 patch 其引用
-        mock.patch("app.agent.llm.factory.create_llm", return_value=mock_llm),
-    ):
-        yield
-
-
-@pytest.fixture
-def client(mock_deps):
-    from app.main import create_app
-    from fastapi.testclient import TestClient
-    return TestClient(create_app())
+def client():
+    with TestClient(app) as c:
+        yield c
 
 
 class TestIngestDocuments:

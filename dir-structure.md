@@ -84,28 +84,43 @@ yd-Agent/
 │       │   ├── refiner.py             # Refiner 节点
 │       │   ├── load_memory.py         # 三期新增：加载用户画像和记忆节点
 │       │   └── save_memory.py         # 三期新增：提取和存储记忆节点
-│       ├── tools/                     # 工具包（全 Worker 共享）
-│       │   ├── __init__.py
-│       │   ├── base.py                 # BaseTool + ToolRegistry
-│       │   ├── bash_tool.py            # BashTool：本地命令执行（用户确认）
-│       │   ├── code_tool.py            # CodeTool：Docker 沙箱代码执行
-│       │   ├── search_tool.py          # SearchTool：GraphRAG 三路检索
-│       │   └── doc_tool.py             # DocTool：文档写入
+│       ├── tools/                     # 工具包 @as_tool + BaseTool + ReAct 循环
+│       │   ├── __init__.py             # 导出 BaseTool/ToolRegistry/as_tool/react_loop 及所有工具类
+│       │   ├── base.py                 # @as_tool 装饰器 + BaseTool + ToolRegistry + react_loop/areact_loop
+│       │   ├── bash_tool.py            # BashTool(@as_tool)：本地 shell 命令执行
+│       │   ├── docker_sandbox_tool.py  # DockerSandBoxTool(@as_tool)：Docker 沙箱 Python 代码执行
+│       │   ├── file_tool.py            # FileTool(@as_tool)：文件读写（write_file/read_file/list_files）
+│       │   └── search_tool.py          # SearchTool(@as_tool)：GraphRAG 三路知识检索
 │       └── sandbox/
 │           ├── __init__.py
 │           └── docker_sandbox.py      # Docker 代码沙箱
 └── test/
     ├── __init__.py
-    ├── conftest.py                     # pytest 夹具（新增 FakeEmbeddings、mock_embeddings）
-    ├── mock_utils.py                   # 共享 mock（FakeLLM 支持 list 输入）
-    └── api/
+    ├── conftest.py                     # pytest 夹具（FakeEmbeddings、mock_embeddings）
+    ├── mock_utils.py                   # 共享 mock（FakeLLM、预设响应常量）
+    ├── api/                            # API 集成测试
+    │   ├── __init__.py
+    │   ├── test_health.py              # 健康检查测试
+    │   ├── test_chat.py                # 对话接口测试
+    │   ├── test_documents.py           # 文档管理 API 测试（9 个用例）
+    │   ├── test_graphrag.py            # GraphRAG 组件测试（9 个用例）
+    │   ├── test_memory.py              # 记忆系统测试（23 个用例）
+    │   └── test_eval.py                # 评估系统测试（26 个用例）
+    ├── tools/                          # 工具层单元测试
+    │   ├── __init__.py
+    │   ├── test_base.py                # @as_tool / BaseTool / ToolRegistry / react_loop（16 个用例）
+    │   ├── test_bash_tool.py           # BashTool 本地命令执行（7 个用例）
+    │   ├── test_docker_sandbox_tool.py # DockerSandBoxTool 代码沙箱（6 个用例）
+    │   ├── test_file_tool.py           # FileTool 文件读写 + 路径穿越防护（11 个用例）
+    │   └── test_search_tool.py         # SearchTool 知识库检索（5 个用例）
+    └── workers/                        # Worker 节点单元测试
         ├── __init__.py
-        ├── test_health.py              # 健康检查测试
-        ├── test_chat.py                # 对话接口测试
-        ├── test_documents.py           # 新增：文档管理 API 测试（9 个用例）
-        ├── test_graphrag.py            # 新增：GraphRAG 组件测试（9 个用例）
-        ├── test_memory.py               # 三期新增：记忆系统测试（23 个用例，全通过）
-        └── test_eval.py                 # 四期新增：评估系统测试（26 个用例，全通过）
+        ├── test_supervisor.py          # Supervisor 调度决策（6 个用例）
+        ├── test_code_worker.py         # Code Worker ReAct 循环（3 个用例）
+        ├── test_docs_worker.py         # Docs Worker ReAct 循环（3 个用例）
+        ├── test_retrieval_worker.py    # Retrieval Worker ReAct 循环（5 个用例）
+        ├── test_summary_worker.py      # Summary Worker 汇总（4 个用例）
+        └── test_refiner.py             # Refiner 质量评估（4 个用例）
 ```
 
 ## 文件用途说明
@@ -194,14 +209,15 @@ yd-Agent/
 | `graph.py` | `build_agent_graph(storage_manager, memory_manager)` 接收两个管理器；新增 load_memory/save_memory 节点 |
 | `nodes/load_memory.py` | 三期新增：加载用户画像和相关记忆注入 AgentState |
 | `nodes/save_memory.py` | 三期新增：从对话中提取记忆、过滤重要性、存储并更新画像 |
-| `nodes/retrieval_worker.py` | 升级为 GraphRAG 检索：关键词提取→三路搜索→上下文构建→LLM 回答；无文档时回退 LLM-only |
-| `nodes/docs_worker.py` | 文档 Worker：LLM 生成文档内容，通过 DocTool 写入文件 |
+| `nodes/code_worker.py` | 代码 Worker：ReAct 循环绑定 DockerSandBoxTool，LLM 自主调用 run_code |
+| `nodes/retrieval_worker.py` | 检索 Worker：ReAct 循环绑定 SearchTool，LLM 自主决定 search_knowledge_base |
+| `nodes/docs_worker.py` | 文档 Worker：ReAct 循环绑定 FileTool，LLM 自主调用 write_file/read_file/list_files |
 | `llm/factory.py` | `create_llm()` / `create_embeddings()`：LLM 与 Embedding 工厂方法 |
-| `tools/base.py` | `BaseTool` 抽象基类 + `ToolRegistry`：注册/获取/初始化全部工具 |
-| `tools/bash_tool.py` | `BashTool`：执行本地 shell 命令，支持用户确认回调 |
-| `tools/code_tool.py` | `CodeTool`：封装 Docker 沙箱 `run_code()`，返回结构化结果 |
-| `tools/search_tool.py` | `SearchTool`：完整检索管道（关键词→三路搜索→加权选块→上下文构建） |
-| `tools/doc_tool.py` | `DocTool`：将文档写入 `./docs/` 目录，自动创建子目录 |
+| `tools/base.py` | `@as_tool` 装饰器 + `BaseTool` + `ToolRegistry` + `react_loop()`/`areact_loop()` |
+| `tools/bash_tool.py` | `BashTool`(@as_tool)：`run_command` 本地 shell 命令执行 |
+| `tools/docker_sandbox_tool.py` | `DockerSandBoxTool`(@as_tool)：`run_code` Docker 沙箱 Python 代码执行 |
+| `tools/file_tool.py` | `FileTool`(@as_tool)：`write_file` / `read_file` / `list_files` 文件读写操作 |
+| `tools/search_tool.py` | `SearchTool`(@as_tool)：`search_knowledge_base` GraphRAG 三路知识检索 |
 
 ### 测试 (`test/`)
 
@@ -213,3 +229,14 @@ yd-Agent/
 | `api/test_graphrag.py` | 9 个测试用例：分块器/关键词提取/上下文构建/FAISSStore 操作 |
 | `api/test_memory.py` | 23 个测试用例：MemoryManager/提取器/检索器/记忆 API/配置回退 |
 | `api/test_eval.py` | 26 个测试用例：EvalManager CRUD/统计/难例/反馈/评估 API/配置回退/难例挖掘 |
+| `tools/test_base.py` | 16 个用例：@as_tool 装饰器 / BaseTool / ToolRegistry / react_loop 循环 |
+| `tools/test_bash_tool.py` | 7 个用例：命令执行/超时/取消/大输出截断 |
+| `tools/test_docker_sandbox_tool.py` | 6 个用例：stdout/stderr/退出码/超时/空输出 |
+| `tools/test_file_tool.py` | 11 个用例：读写/追加/列表/路径穿越防护 |
+| `tools/test_search_tool.py` | 5 个用例：无文档/有文档/空上下文/inject |
+| `workers/test_supervisor.py` | 6 个用例：路由决策/未知 Worker 过滤/空回退/画像 |
+| `workers/test_code_worker.py` | 3 个用例：结构化输出/空消息/纠错反馈 |
+| `workers/test_docs_worker.py` | 3 个用例：结构化输出/空消息/纠错反馈 |
+| `workers/test_retrieval_worker.py` | 5 个用例：有/无 storage_manager / 注入 / 纠错反馈 |
+| `workers/test_summary_worker.py` | 4 个用例：有/无结果/失败 Worker/画像注入 |
+| `workers/test_refiner.py` | 4 个用例：高分通过/低分重试/上限/未知 Worker 过滤 |

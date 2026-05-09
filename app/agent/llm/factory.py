@@ -25,4 +25,6 @@ def create_embeddings():
         model=settings.embedding_model,
         base_url=settings.embedding_base_url or settings.llm_base_url,
         api_key=settings.embedding_api_key or settings.llm_api_key,
+        check_embedding_ctx_length=False,
+        tiktoken_enabled=False,
     )

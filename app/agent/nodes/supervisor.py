@@ -18,15 +18,20 @@ def supervisor_node(state: AgentState) -> dict:
         .replace("{user_message}", user_message)
     )
 
-    structured_llm = llm.with_structured_output(SupervisorOutput)
-    result: SupervisorOutput = structured_llm.invoke(prompt)
+    try:
+        structured_llm = llm.with_structured_output(SupervisorOutput)
+        result: SupervisorOutput = structured_llm.invoke(prompt)
+        workers = [w for w in result.workers if w in ALL_WORKERS]
+        reasoning = result.reasoning
+    except Exception:
+        workers = []
+        reasoning = ""
 
-    workers = [w for w in result.workers if w in ALL_WORKERS]
     if not workers:
         workers = ["summary"]
 
     return {
         "worker_assignments": workers,
-        "dispatch_reasoning": result.reasoning,
+        "dispatch_reasoning": reasoning,
         "worker_results": [],
     }
