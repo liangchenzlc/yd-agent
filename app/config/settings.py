@@ -11,10 +11,6 @@ class Settings(BaseSettings):
     llm_base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
     llm_model: str = "qwen3.6-flash"
 
-    # 服务
-    api_host: str = "0.0.0.0"
-    api_port: int = 8000
-
     # 反思
     max_refinements: int = 2
 
