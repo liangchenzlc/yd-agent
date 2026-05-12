@@ -40,7 +40,7 @@ def save_memory_node(
     # 存储记忆
     if significant:
         embeddings_api = llm_factory.create_embeddings()
-        session_id = state.get("user_id", "unknown")
+        session_id = state.get("session_id", state.get("user_id", "unknown"))
         loop.run_until_complete(
             memory_manager.store_session_memory(
                 user_id=user_id,

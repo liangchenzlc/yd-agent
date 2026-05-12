@@ -2,14 +2,16 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.agent.llm.factory import create_embeddings
+from app.agent.llm.factory import create_embeddings, embed_documents_batched
 from app.agent.storage.vector_store import FAISSStore
+
+LOW_CONFIDENCE_THRESHOLD = 0.25
 
 
 def _embed_texts(texts: list[str]) -> list[list[float]]:
     """批量嵌入文本。"""
     emb = create_embeddings()
-    return emb.embed_documents(texts) if texts else []
+    return embed_documents_batched(emb, texts) if texts else []
 
 
 def local_search(
@@ -23,7 +25,7 @@ def local_search(
 
     query = " ".join(keywords)
     emb = _embed_texts([query])[0]
-    results = entities_vdb.similarity_search_by_vector(emb, k=top_k)
+    results = _search_with_low_confidence_fallback(entities_vdb, emb, top_k)
     return {"entities": results, "relations": []}
 
 
@@ -38,7 +40,7 @@ def global_search(
 
     query = " ".join(keywords)
     emb = _embed_texts([query])[0]
-    results = relationships_vdb.similarity_search_by_vector(emb, k=top_k)
+    results = _search_with_low_confidence_fallback(relationships_vdb, emb, top_k)
     return {"entities": [], "relations": results}
 
 
@@ -52,4 +54,28 @@ def naive_search(
         return []
 
     emb = _embed_texts([query])[0]
-    return chunks_vdb.similarity_search_by_vector(emb, k=top_k)
+    return _search_with_low_confidence_fallback(chunks_vdb, emb, top_k)
+
+
+def _search_with_low_confidence_fallback(
+    store: FAISSStore,
+    embedding: list[float],
+    top_k: int,
+) -> list[dict]:
+    results = store.similarity_search_by_vector(
+        embedding,
+        k=top_k,
+        score_threshold=LOW_CONFIDENCE_THRESHOLD,
+    )
+    if results:
+        return results
+
+    fallback = store.similarity_search_by_vector(embedding, k=1, score_threshold=None)
+    marked = []
+    for item in fallback:
+        item = dict(item)
+        metadata = dict(item.get("metadata", {}))
+        metadata["low_confidence"] = True
+        item["metadata"] = metadata
+        marked.append(item)
+    return marked

@@ -26,6 +26,7 @@ class AgentState(TypedDict):
     final_answer: str  # 最终回答
 
     user_id: str  # 用户标识
+    session_id: str  # 会话标识
     user_profile: dict  # 用户画像（load_memory 后填充）
     relevant_memories: list[dict]  # 相关历史记忆
     session_history: list[dict]  # 近期会话历史

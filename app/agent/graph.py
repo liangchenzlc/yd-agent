@@ -27,7 +27,7 @@ WORKER_NODE_MAP = {
 
 def route_to_workers(state: AgentState) -> list[Send]:
     """Supervisor 之后的条件路由：根据 worker_assignments 并行分发。"""
-    assignments = state.get("worker_assignments", [])
+    assignments = state.get("refinement_targets") or state.get("worker_assignments", [])
     if not assignments:
         assignments = ["summary"]
     return [Send(WORKER_NODE_MAP[w], state) for w in assignments if w in WORKER_NODE_MAP]

@@ -10,16 +10,23 @@ def collect_chunks_from_entities(
     text_chunks_store: Any,
 ) -> list[dict]:
     """从实体的 source_id 解析 chunk IDs 并获取文本。"""
-    chunk_ids = set()
+    chunk_keys = set()
     for ent in entities:
-        source_id = ent.get("metadata", {}).get("source_id", "")
+        metadata = ent.get("metadata", {})
+        source_id = metadata.get("source_id", "")
+        doc_id = metadata.get("doc_id", "")
         if source_id:
             parts = source_id.split(GRAPH_FIELD_SEP)
-            chunk_ids.update(p for p in parts if p.startswith("chunk_"))
+            for part in parts:
+                if not part.startswith("chunk_"):
+                    continue
+                chunk_keys.add(f"chunk:{part}")
+                if doc_id:
+                    chunk_keys.add(f"chunk:{doc_id}_{part}")
 
     chunks = []
-    for cid in chunk_ids:
-        chunk_data = text_chunks_store.get_by_id(f"chunk:{cid}")
+    for key in chunk_keys:
+        chunk_data = text_chunks_store.get_by_id(key)
         if chunk_data:
             chunks.append(chunk_data)
     return chunks

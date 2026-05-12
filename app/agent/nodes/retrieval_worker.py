@@ -1,4 +1,5 @@
 from app.agent.constants import WORKER_RETRIEVAL
+from app.agent.conversation import format_conversation_context
 from app.agent.llm import factory as llm_factory
 from app.agent.prompts import RETRIEVAL_WORKER_PROMPT
 from app.agent.state import AgentState
@@ -18,6 +19,7 @@ def retrieval_worker_node(state: AgentState, storage_manager: StorageManager | N
     prompt = (
         RETRIEVAL_WORKER_PROMPT.replace("{refinement_context}", refinement_context)
         .replace("{user_message}", user_message)
+        .replace("{conversation_context}", format_conversation_context(messages))
     )
 
     # 向已注册的 SearchTool 注入 storage_manager，LLM 自主决定是否检索
@@ -35,6 +37,7 @@ def retrieval_worker_node(state: AgentState, storage_manager: StorageManager | N
                 "error": None,
                 "metadata": {
                     "has_documents": bool(storage_manager and storage_manager.has_documents),
+                    "refinement_count": state.get("refinement_count", 0),
                 },
             }
         ]

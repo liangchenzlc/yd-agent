@@ -21,6 +21,7 @@ def make_initial_state(message: str, user_id: str = "default") -> AgentState:
         refinement_targets=[],
         final_answer="",
         user_id=user_id,
+        session_id="test",
         user_profile={},
         relevant_memories=[],
         session_history=[],

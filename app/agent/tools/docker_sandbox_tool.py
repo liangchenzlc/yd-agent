@@ -23,11 +23,11 @@ class DockerSandBoxTool(BaseTool):
         result = docker_sandbox.run_code(code, timeout=timeout)
         parts = []
         if result.stdout:
-            parts.append(result.stdout)
+            parts.append(result.stdout.rstrip())
         if result.stderr:
             if parts:
                 parts.append("")
-            parts.append(f"[stderr]\n{result.stderr}")
+            parts.append(f"[stderr]\n{result.stderr.rstrip()}")
         if result.exit_code != 0:
             parts.append(f"[进程退出码: {result.exit_code}]")
         if result.timed_out:

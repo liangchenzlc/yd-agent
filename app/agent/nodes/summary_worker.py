@@ -1,4 +1,5 @@
 from app.agent.state import AgentState
+from app.agent.conversation import format_conversation_context
 from app.agent.prompts import SUMMARY_PROMPT
 from app.agent.llm import factory as llm_factory
 from app.agent.memory.retriever import format_memory_context, format_profile_context
@@ -10,7 +11,11 @@ def summary_worker_node(state: AgentState) -> dict:
     messages = state.get("messages", [])
     user_message = messages[-1].content if messages else ""
 
-    worker_results = state.get("worker_results", [])
+    current_refinement = state.get("refinement_count", 0)
+    worker_results = [
+        r for r in state.get("worker_results", [])
+        if r.get("metadata", {}).get("refinement_count", 0) == current_refinement
+    ]
 
     # 格式化 Worker 结果
     if worker_results:
@@ -33,6 +38,7 @@ def summary_worker_node(state: AgentState) -> dict:
         SUMMARY_PROMPT.replace("{user_profile_section}", user_profile_section)
         .replace("{memory_section}", memory_section)
         .replace("{user_message}", user_message)
+        .replace("{conversation_context}", format_conversation_context(messages))
         .replace("{worker_results}", results_text)
     )
     response = llm.invoke(prompt)

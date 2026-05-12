@@ -1,7 +1,19 @@
 """测试 DockerSandBoxTool（真实 Docker 沙箱）。"""
 
+from app.agent.sandbox.docker_sandbox import SandboxResult
 from app.agent.tools.docker_sandbox_tool import DockerSandBoxTool
 from test.helpers import skip_if_no_docker
+
+
+def test_run_code_formats_stdout_and_stderr(monkeypatch):
+    def fake_run_code(code: str, timeout: int):
+        return SandboxResult(stdout="out\n", stderr="err\n", exit_code=0, timed_out=False)
+
+    monkeypatch.setattr("app.agent.tools.docker_sandbox_tool.docker_sandbox.run_code", fake_run_code)
+
+    result = DockerSandBoxTool().run_code("print('x')")
+
+    assert result == "out\n\n[stderr]\nerr"
 
 
 def test_run_code_stdout():

@@ -27,4 +27,22 @@ def create_embeddings():
         api_key=settings.embedding_api_key or settings.llm_api_key,
         check_embedding_ctx_length=False,
         tiktoken_enabled=False,
+        chunk_size=settings.embedding_batch_size,
     )
+
+
+def embed_documents_batched(embeddings_api, texts: list[str], batch_size: int | None = None) -> list[list[float]]:
+    """Embed documents in provider-safe batches."""
+    if not texts:
+        return []
+
+    settings = get_settings()
+    size = batch_size or settings.embedding_batch_size
+    if size <= 0:
+        raise ValueError("embedding_batch_size must be greater than 0")
+
+    embeddings: list[list[float]] = []
+    for start in range(0, len(texts), size):
+        batch = texts[start:start + size]
+        embeddings.extend(embeddings_api.embed_documents(batch))
+    return embeddings

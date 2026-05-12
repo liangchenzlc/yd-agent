@@ -11,8 +11,12 @@ def refiner_node(state: AgentState) -> dict:
     messages = state.get("messages", [])
     user_message = messages[-1].content if messages else ""
     final_answer = state.get("final_answer", "")
-    worker_results = state.get("worker_results", [])
-    refinement_count = state.get("refinement_count", 0)
+    current_refinement = state.get("refinement_count", 0)
+    worker_results = [
+        r for r in state.get("worker_results", [])
+        if r.get("metadata", {}).get("refinement_count", 0) == current_refinement
+    ]
+    refinement_count = current_refinement
 
     results_text = "\n".join(
         f"[{r.get('worker', '?')}] {r.get('content', '')[:500]}"

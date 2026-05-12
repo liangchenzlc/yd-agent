@@ -44,4 +44,6 @@ class StorageManager:
     @property
     def has_documents(self) -> bool:
         """是否有已摄入的文档。"""
-        return not self.entities_vdb.is_empty()
+        if not self.chunks_vdb.is_empty():
+            return True
+        return any(key.startswith("doc_meta:") for key in self.text_chunks_kv.keys())

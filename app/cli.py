@@ -2,26 +2,29 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import hashlib
+import difflib
 import json
 import sys
 from pathlib import Path
 from typing import Any
 
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 from rich.console import Console
 from rich.markdown import Markdown
 from rich.panel import Panel
+from rich.text import Text
 from rich.table import Table
 
 from app.agent.ingestion.chunker import chunk_text
 from app.agent.ingestion.extractor import extract_entities
-from app.agent.llm.factory import create_embeddings
+from app.agent.llm.factory import create_embeddings, embed_documents_batched
 from app.agent.state import AgentState
 from app.config.settings import get_settings
 from app.runtime import AgentRuntime
+from app.services.documents import delete_document, document_stats, ingest_document, list_documents
 
 console = Console()
+APP_VERSION = "dev"
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -29,11 +32,12 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     chat_parser = subparsers.add_parser("chat", help="向 yd-Agent 提问")
-    chat_parser.add_argument("message", help="用户消息")
+    chat_parser.add_argument("message", nargs="?", default="", help="用户消息")
     chat_parser.add_argument("--user-id", default="default", help="用户标识")
     chat_parser.add_argument("--session-id", default=None, help="会话 ID")
     chat_parser.add_argument("--stream", action="store_true", help="流式输出执行进度")
     chat_parser.add_argument("--json", action="store_true", help="输出 JSON 或 JSON Lines")
+    chat_parser.add_argument("-i", "--interactive", action="store_true", help="进入连续对话界面")
 
     documents_parser = subparsers.add_parser("documents", help="管理 GraphRAG 文档")
     document_subparsers = documents_parser.add_subparsers(dest="document_command", required=True)
@@ -79,9 +83,13 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _initial_state(message: str, user_id: str) -> AgentState:
+def _initial_state(message: str, user_id: str, session_id: str | None = None) -> AgentState:
+    return _state_from_messages([HumanMessage(content=message)], user_id, session_id or "main")
+
+
+def _state_from_messages(messages: list[BaseMessage], user_id: str, session_id: str = "main") -> AgentState:
     return AgentState(
-        messages=[HumanMessage(content=message)],
+        messages=list(messages),
         worker_assignments=[],
         dispatch_reasoning="",
         worker_results=[],
@@ -91,6 +99,7 @@ def _initial_state(message: str, user_id: str) -> AgentState:
         refinement_targets=[],
         final_answer="",
         user_id=user_id,
+        session_id=session_id,
         user_profile={},
         relevant_memories=[],
         session_history=[],
@@ -110,12 +119,18 @@ def _response_payload(result: dict[str, Any], session_id: str | None) -> dict[st
 
 
 async def _run_chat(args: argparse.Namespace) -> int:
+    if args.interactive:
+        if args.json:
+            console.print("[red]交互模式暂不支持 --json 输出[/red]")
+            return 2
+        return await _run_interactive_chat(args)
+
     if not args.message.strip():
         console.print("[red]消息不能为空[/red]")
         return 2
 
     async with AgentRuntime() as runtime:
-        state = _initial_state(args.message, args.user_id)
+        state = _initial_state(args.message, args.user_id, args.session_id or "main")
         if args.stream:
             return await _run_stream_chat(runtime.graph, state, args)
 
@@ -131,6 +146,90 @@ async def _run_chat(args: argparse.Namespace) -> int:
     if payload["refinements"]:
         console.print(f"Refinements: {payload['refinements']}")
     return 0
+
+
+async def _run_interactive_chat(args: argparse.Namespace) -> int:
+    session_id = args.session_id or "main"
+    messages: list[BaseMessage] = []
+    if args.message.strip():
+        messages.append(HumanMessage(content=args.message.strip()))
+
+    _print_chat_header(args.user_id, session_id)
+    console.print("[dim]输入 /help 查看命令，/exit 退出。[/dim]")
+
+    async with AgentRuntime() as runtime:
+        if messages:
+            await _run_interactive_turn(runtime.graph, messages, args.user_id, session_id)
+
+        while True:
+            try:
+                user_input = console.input("[bold yellow]you > [/bold yellow]").strip()
+            except (EOFError, KeyboardInterrupt):
+                console.print()
+                return 0
+
+            if not user_input:
+                continue
+
+            command = user_input.lower()
+            if command in {"/exit", "/quit", "exit", "quit"}:
+                console.print("[dim]会话已结束。[/dim]")
+                return 0
+            if command == "/clear":
+                messages.clear()
+                console.rule("[dim]session cleared[/dim]")
+                continue
+            if command == "/help":
+                _print_interactive_help()
+                continue
+
+            messages.append(HumanMessage(content=user_input))
+            await _run_interactive_turn(runtime.graph, messages, args.user_id, session_id)
+
+
+async def _run_interactive_turn(
+    graph: Any,
+    messages: list[BaseMessage],
+    user_id: str,
+    session_id: str,
+) -> None:
+    state = _state_from_messages(messages, user_id, session_id)
+    with console.status("[bold cyan]agent running...[/bold cyan]", spinner="dots"):
+        result = await graph.ainvoke(state)
+
+    payload = _response_payload(result, session_id)
+    workers = ", ".join(payload["workers_used"]) or "none"
+    reasoning = payload["reasoning"] or "no reasoning"
+    console.print(f"[dim]supervisor -> {workers} | {reasoning}[/dim]")
+    console.print(Panel(Markdown(payload["answer"] or "（无回答）"), title="assistant", border_style="cyan"))
+    if payload["refinements"]:
+        console.print(f"[dim]refinements: {payload['refinements']}[/dim]")
+    messages.append(AIMessage(content=payload["answer"] or ""))
+
+
+def _print_chat_header(user_id: str, session_id: str) -> None:
+    title = Text()
+    title.append("yd-Agent ", style="bold red")
+    title.append(APP_VERSION, style="bold")
+    title.append(" - local multi-agent assistant", style="red")
+    console.print(title)
+    console.print(
+        f"[bold yellow]yd-agent chat[/bold yellow] - agent main - session {session_id}"
+    )
+    console.print(
+        f"[dim]user {user_id} | workers supervisor/retrieval/code/docs/summary | status idle[/dim]"
+    )
+    console.rule(style="dim")
+
+
+def _print_interactive_help() -> None:
+    table = Table(title="Interactive commands")
+    table.add_column("command")
+    table.add_column("description")
+    table.add_row("/help", "显示命令")
+    table.add_row("/clear", "清空当前进程内的对话上下文")
+    table.add_row("/exit", "退出连续对话")
+    console.print(table)
 
 
 async def _run_stream_chat(graph: Any, state: AgentState, args: argparse.Namespace) -> int:
@@ -277,6 +376,12 @@ def _print_hard_cases(cases: list[dict[str, Any]], total: int) -> None:
 
 
 async def _run_documents(args: argparse.Namespace) -> int:
+    if args.document_command == "ingest":
+        path_error = _document_ingest_path_error(Path(args.path))
+        if path_error:
+            console.print(f"[red]{path_error}[/red]")
+            return 2
+
     async with AgentRuntime() as runtime:
         if args.document_command == "ingest":
             return await _documents_ingest(runtime.storage_manager, args)
@@ -290,90 +395,32 @@ async def _run_documents(args: argparse.Namespace) -> int:
 
 
 async def _documents_ingest(storage_manager: Any, args: argparse.Namespace) -> int:
-    path = Path(args.path)
-    content = path.read_text(encoding="utf-8")
-    doc_id = args.id or hashlib.md5(content.encode("utf-8")).hexdigest()[:16]
-    storage_ctx = storage_manager.get_context()
-
-    if storage_ctx["text_chunks_kv"].get_by_id(f"doc_meta:{doc_id}") is not None:
-        _print_mapping("Documents ingest", {"ingested": 0, "skipped": 1, "total_chunks": 0, "total_entities": 0, "total_relationships": 0})
-        return 0
-
-    chunks = chunk_text(content)
-    texts = [chunk["content"] for chunk in chunks]
-    if not texts:
-        _print_mapping("Documents ingest", {"ingested": 0, "skipped": 1, "total_chunks": 0, "total_entities": 0, "total_relationships": 0})
-        return 0
-
-    embeddings_api = create_embeddings()
-    embedded = embeddings_api.embed_documents(texts)
-    chunk_ids = [f"{doc_id}_{chunk['chunk_id']}" for chunk in chunks]
-    metadatas = [{"doc_id": doc_id, "chunk_index": chunk["index"]} for chunk in chunks]
-    storage_ctx["chunks_vdb"].add_texts(chunk_ids, texts, embedded, metadatas)
-    storage_ctx["text_chunks_kv"].mset(
-        {f"chunk:{chunk_id}": {"text": text, "doc_id": doc_id} for chunk_id, text in zip(chunk_ids, texts)}
+    result = await ingest_document(
+        storage_manager,
+        Path(args.path),
+        args.id,
+        chunker=chunk_text,
+        entity_extractor=extract_entities,
+        embeddings_factory=create_embeddings,
+        embedder=embed_documents_batched,
     )
-
-    result = extract_entities(chunks)
-    entities = result.get("entities", [])
-    relationships = result.get("relationships", [])
-
-    if entities:
-        entity_texts = [f"{entity['name']}: {entity.get('description', '')}" for entity in entities]
-        entity_ids = [f"{doc_id}_ent_{index}" for index in range(len(entities))]
-        entity_embs = embeddings_api.embed_documents(entity_texts)
-        entity_metas = [{"doc_id": doc_id, "type": entity.get("type", ""), "source_id": entity.get("source_id", "")} for entity in entities]
-        storage_ctx["entities_vdb"].add_texts(entity_ids, entity_texts, entity_embs, entity_metas)
-        for entity in entities:
-            storage_ctx["graph"].upsert_node(entity["name"], {"doc_id": doc_id, "type": entity.get("type", ""), "description": entity.get("description", "")})
-
-    if relationships:
-        rel_texts = [f"{rel['source']} - {rel['type']} -> {rel['target']}" for rel in relationships]
-        rel_ids = [f"{doc_id}_rel_{index}" for index in range(len(relationships))]
-        rel_embs = embeddings_api.embed_documents(rel_texts)
-        rel_metas = [{"doc_id": doc_id, "source": rel["source"], "target": rel["target"], "type": rel["type"]} for rel in relationships]
-        storage_ctx["relationships_vdb"].add_texts(rel_ids, rel_texts, rel_embs, rel_metas)
-        for rel in relationships:
-            storage_ctx["graph"].upsert_edge(rel["source"], rel["target"], {"doc_id": doc_id, "type": rel["type"], "description": rel.get("description", "")})
-
-    storage_ctx["text_chunks_kv"].upsert({f"doc_meta:{doc_id}": {"source": str(path)}})
-    await storage_manager.finalize()
-    _print_mapping(
-        "Documents ingest",
-        {
-            "ingested": 1,
-            "skipped": 0,
-            "total_chunks": len(chunks),
-            "total_entities": len(entities),
-            "total_relationships": len(relationships),
-        },
-    )
+    _print_mapping("Documents ingest", result)
     return 0
 
 
 def _documents_stats(storage_manager: Any) -> int:
-    storage_ctx = storage_manager.get_context()
-    values = {
-        "total_documents": len([key for key in storage_ctx["text_chunks_kv"].keys() if key.startswith("doc_meta:")]),
-        "total_chunks": len(storage_ctx["chunks_vdb"]),
-        "total_entities": len(storage_ctx["entities_vdb"]),
-        "total_relationships": len(storage_ctx["relationships_vdb"]),
-    }
-    _print_mapping("Documents stats", values)
+    _print_mapping("Documents stats", document_stats(storage_manager))
     return 0
 
 
 def _documents_list(storage_manager: Any) -> int:
-    storage_ctx = storage_manager.get_context()
     table = Table(title="Documents")
     table.add_column("id")
+    table.add_column("source")
     table.add_column("chunks")
     table.add_column("entities")
-    for doc_key in [key for key in storage_ctx["text_chunks_kv"].keys() if key.startswith("doc_meta:")]:
-        doc_id = doc_key.replace("doc_meta:", "")
-        chunks = len([key for key in storage_ctx["text_chunks_kv"].keys() if key.startswith(f"chunk:{doc_id}_")])
-        entities = sum(1 for meta in storage_ctx["entities_vdb"]._id_to_meta.values() if meta.get("metadata", {}).get("doc_id") == doc_id)
-        table.add_row(doc_id, str(chunks), str(entities))
+    for doc in list_documents(storage_manager):
+        table.add_row(doc["id"], doc["source"], str(doc["chunks"]), str(doc["entities"]))
     console.print(table)
     return 0
 
@@ -383,25 +430,57 @@ async def _documents_delete(storage_manager: Any, args: argparse.Namespace) -> i
         console.print("[red]删除文档需要 --yes 确认[/red]")
         return 2
 
-    storage_ctx = storage_manager.get_context()
-    doc_id = args.doc_id
-    existed = storage_ctx["text_chunks_kv"].get_by_id(f"doc_meta:{doc_id}") is not None
-    chunk_keys = [key for key in storage_ctx["text_chunks_kv"].keys() if key.startswith(f"chunk:{doc_id}_")]
-
-    storage_ctx["text_chunks_kv"].mdelete([f"doc_meta:{doc_id}"])
-    storage_ctx["text_chunks_kv"].mdelete(chunk_keys)
-    storage_ctx["chunks_vdb"].delete_by_metadata("doc_id", doc_id)
-    storage_ctx["entities_vdb"].delete_by_metadata("doc_id", doc_id)
-    storage_ctx["relationships_vdb"].delete_by_metadata("doc_id", doc_id)
-
-    graph = storage_ctx["graph"]
-    for node_id, data in graph.get_all_nodes():
-        if data.get("doc_id") == doc_id:
-            graph.delete_node(node_id)
-
-    await storage_manager.finalize()
-    _print_mapping("Documents delete", {"deleted": existed or bool(chunk_keys), "doc_id": doc_id})
+    result = await delete_document(storage_manager, args.doc_id)
+    _print_mapping("Documents delete", result)
     return 0
+
+
+def _rollback_document_writes(storage_ctx: dict[str, Any], doc_id: str) -> None:
+    from app.services.documents import rollback_document_writes
+
+    rollback_document_writes(storage_ctx, doc_id)
+
+
+def _document_ingest_path_error(path: Path) -> str:
+    if not path.exists():
+        message = f"文档文件不存在：{path}"
+        suggestion = _suggest_existing_path(path)
+        if suggestion:
+            message += f"\n你是不是想输入：{suggestion}"
+        return message
+    if not path.is_file():
+        return f"文档路径不是文件：{path}"
+    return ""
+
+
+def _suggest_existing_path(path: Path) -> str:
+    """Return a close existing path for common CLI typos."""
+    parts = path.parts
+    if not parts:
+        return ""
+
+    base = Path.cwd()
+    first = Path(parts[0]).name
+    siblings = [item.name for item in base.iterdir() if item.is_dir()]
+    matches = difflib.get_close_matches(first, siblings, n=1, cutoff=0.65)
+    if matches:
+        candidate = base.joinpath(matches[0], *parts[1:])
+        if candidate.exists():
+            return str(candidate.relative_to(base))
+
+    parent = path.parent if str(path.parent) != "." else base
+    if parent.exists() and path.name:
+        names = [item.name for item in parent.iterdir()]
+        file_matches = difflib.get_close_matches(path.name, names, n=1, cutoff=0.65)
+        if file_matches:
+            candidate = parent / file_matches[0]
+            if candidate.exists():
+                try:
+                    return str(candidate.relative_to(base))
+                except ValueError:
+                    return str(candidate)
+
+    return ""
 
 
 def _print_mapping(title: str, values: dict[str, Any]) -> None:

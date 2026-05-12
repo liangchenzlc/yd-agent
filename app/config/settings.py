@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     embedding_model: str = "text-embedding-v4"
     embedding_api_key: str = ""
     embedding_base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    embedding_batch_size: int = 10
 
     # 存储
     storage_dir: str = "./data/storage"
@@ -38,6 +39,9 @@ class Settings(BaseSettings):
     eval_golden_model: str = ""
     eval_retention_days: int = 30
     eval_maintenance_interval_hours: int = 6
+
+    # Web
+    web_secret_key: str = "change-me-in-production"
 
 
 @lru_cache

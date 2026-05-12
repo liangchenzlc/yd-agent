@@ -6,9 +6,13 @@ __pycache__/
 venv/
 *.log
 .pytest_cache/
+.tmp_pytest*/
 .ruff_cache/
+.idea/
+node_modules/
 dist/
 build/
 *.tmp
 data/
 docs/
+.claude/

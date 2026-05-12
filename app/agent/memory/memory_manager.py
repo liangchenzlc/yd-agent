@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from uuid import uuid4
 
 from app.agent.constants import (
     CORE_MEMORY_WEIGHT,
@@ -99,12 +100,19 @@ class MemoryManager:
         working_metas = []
 
         now = datetime.now(timezone.utc).isoformat()
+        memory_batch_id = uuid4().hex
 
         for i, m in enumerate(memories):
             imp = m.get("importance", 0.5)
-            mem_id = f"{user_id}_{session_id}_{i}"
+            mem_id = f"{user_id}_{session_id}_{memory_batch_id}_{i}"
             text = f"{m.get('type', '')}: {m.get('content', '')}"
-            meta = {"type": m.get("type", ""), "importance": imp, "user_id": user_id, "timestamp": now}
+            meta = {
+                "type": m.get("type", ""),
+                "importance": imp,
+                "user_id": user_id,
+                "session_id": session_id,
+                "timestamp": now,
+            }
 
             if imp >= importance_threshold:
                 core_ids.append(mem_id)

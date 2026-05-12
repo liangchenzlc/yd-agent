@@ -1,4 +1,5 @@
 from app.agent.constants import WORKER_CODE
+from app.agent.conversation import format_conversation_context
 from app.agent.llm import factory as llm_factory
 from app.agent.prompts import CODE_WORKER_PROMPT
 from app.agent.state import AgentState
@@ -18,6 +19,7 @@ def code_worker_node(state: AgentState) -> dict:
     prompt = (
         CODE_WORKER_PROMPT.replace("{refinement_context}", refinement_context)
         .replace("{user_message}", user_message)
+        .replace("{conversation_context}", format_conversation_context(messages))
     )
 
     # 绑定 DockerSandBoxTool 工具，LLM 自主决定是否调用
@@ -32,7 +34,7 @@ def code_worker_node(state: AgentState) -> dict:
                 "worker": WORKER_CODE,
                 "content": content,
                 "error": None,
-                "metadata": {},
+                "metadata": {"refinement_count": state.get("refinement_count", 0)},
             }
         ]
     }

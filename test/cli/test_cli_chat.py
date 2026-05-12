@@ -4,8 +4,12 @@ from rich.console import Console
 
 
 class FakeGraph:
+    def __init__(self):
+        self.calls = []
+
     async def ainvoke(self, state):
         self.state = state
+        self.calls.append(state)
         return {
             "final_answer": "你好，我是 CLI 助手。",
             "dispatch_reasoning": "普通问答",
@@ -72,6 +76,7 @@ def test_chat_json_outputs_structured_response(monkeypatch, capsys):
         "memories_updated": True,
     }
     assert runtime.graph.state["user_id"] == "alice"
+    assert runtime.graph.state["session_id"] == "s1"
     assert runtime.graph.state["messages"][0].content == "你好"
 
 
@@ -81,3 +86,26 @@ def test_chat_text_outputs_rich_answer(monkeypatch):
     assert code == 0
     assert "你好，我是 CLI 助手。" in output
     assert "Workers" in output
+
+
+def test_chat_interactive_keeps_conversation_context(monkeypatch):
+    import app.cli as cli
+
+    console = Console(record=True, width=100, color_system=None)
+    inputs = iter(["第一轮", "第二轮", "/exit"])
+    monkeypatch.setattr(console, "input", lambda prompt="": next(inputs))
+    monkeypatch.setattr(cli, "console", console)
+    runtime = FakeRuntime()
+    monkeypatch.setattr(cli, "AgentRuntime", lambda: runtime)
+
+    code = cli.main(["chat", "--interactive", "--user-id", "alice", "--session-id", "s1"])
+
+    assert code == 0
+    assert len(runtime.graph.calls) == 2
+    second_messages = runtime.graph.calls[1]["messages"]
+    assert runtime.graph.calls[1]["session_id"] == "s1"
+    assert [message.content for message in second_messages] == [
+        "第一轮",
+        "你好，我是 CLI 助手。",
+        "第二轮",
+    ]

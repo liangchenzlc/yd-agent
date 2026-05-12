@@ -10,7 +10,7 @@ from typing_extensions import TypedDict
 from app.agent.exceptions import IngestionError
 from app.agent.ingestion.chunker import chunk_text
 from app.agent.ingestion.extractor import extract_entities
-from app.agent.llm.factory import create_embeddings
+from app.agent.llm.factory import create_embeddings, embed_documents_batched
 from app.agent.storage_manager import StorageManager
 
 
@@ -51,13 +51,16 @@ def check_duplicates_node(storage: StorageManager) -> callable:
 
         doc = docs[idx]
         doc_id = _compute_doc_id(doc["content"])
-        is_dup = doc_id in storage.text_chunks_kv.keys()  # 简单判重
+        is_dup = storage.text_chunks_kv.get_by_id(f"doc_meta:{doc_id}") is not None
 
         return {
             "doc_id": doc_id,
             "content": doc["content"],
             "metadata": doc.get("metadata", {}),
             "is_duplicate": is_dup,
+            "chunks": [],
+            "entities": [],
+            "relationships": [],
         }
 
     return fn
@@ -96,8 +99,7 @@ def embed_chunks_node(storage: StorageManager) -> callable:
 
         embeddings_api = create_embeddings()
         texts = [c["content"] for c in chunks]
-        # 批量嵌入
-        embedded = embeddings_api.embed_documents(texts)
+        embedded = embed_documents_batched(embeddings_api, texts)
 
         ids = [f"{state['doc_id']}_{c['chunk_id']}" for c in chunks]
         metadatas = [{"doc_id": state["doc_id"], "chunk_index": c["index"]} for c in chunks]
@@ -130,8 +132,15 @@ def extract_entities_node(storage: StorageManager) -> callable:
             embeddings_api = create_embeddings()
             entity_texts = [e["name"] + ": " + e.get("description", "") for e in entities]
             entity_ids = [f"{state['doc_id']}_ent_{i}" for i in range(len(entities))]
-            entity_embs = embeddings_api.embed_documents(entity_texts)
-            metadatas = [{"doc_id": state["doc_id"], "type": e.get("type", "")} for e in entities]
+            entity_embs = embed_documents_batched(embeddings_api, entity_texts)
+            metadatas = [
+                {
+                    "doc_id": state["doc_id"],
+                    "type": e.get("type", ""),
+                    "source_id": e.get("source_id", ""),
+                }
+                for e in entities
+            ]
             storage.entities_vdb.add_texts(entity_ids, entity_texts, entity_embs, metadatas)
 
             # 存储到图
@@ -143,7 +152,7 @@ def extract_entities_node(storage: StorageManager) -> callable:
             embeddings_api = create_embeddings()
             rel_texts = [f"{r['source']} - {r['type']} -> {r['target']}: {r.get('description', '')}" for r in relationships]
             rel_ids = [f"{state['doc_id']}_rel_{i}" for i in range(len(relationships))]
-            rel_embs = embeddings_api.embed_documents(rel_texts)
+            rel_embs = embed_documents_batched(embeddings_api, rel_texts)
             metadatas = [{"doc_id": state["doc_id"], "source": r["source"], "target": r["target"], "type": r["type"]} for r in relationships]
             storage.relationships_vdb.add_texts(rel_ids, rel_texts, rel_embs, metadatas)
 
