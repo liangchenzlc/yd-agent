@@ -6,6 +6,7 @@ from uuid import uuid4
 
 from fastapi import APIRouter, Depends, File, UploadFile
 
+from app.agent.stats.usage_tracker import get_daily_stats
 from app.config.settings import get_settings
 from app.runtime import AgentRuntime
 from app.services.documents import delete_document, ingest_document, list_documents
@@ -23,7 +24,7 @@ def users(user: dict = Depends(require_admin)) -> list[dict]:
 
 @router.post("/users")
 def create_user(payload: AdminUserCreateRequest, user: dict = Depends(require_admin)) -> dict:
-    created = db.create_user(payload.username, hash_password(payload.password), role=payload.role)
+    created = db.create_user(payload.username, hash_password(payload.password), role=payload.role, tenant_id=payload.tenant_id)
     return _public_admin_user(created)
 
 
@@ -39,7 +40,7 @@ def update_user(user_id: int, payload: AdminUserUpdateRequest, user: dict = Depe
 
 @router.get("/documents")
 async def documents(user: dict = Depends(require_admin)) -> list[dict]:
-    async with AgentRuntime() as runtime:
+    async with AgentRuntime(tenant_id=user.get("tenant_id", "default")) as runtime:
         docs = list_documents(runtime.storage_manager)
     records = {item["id"]: item for item in db.list_document_records()}
     for doc in docs:
@@ -57,7 +58,7 @@ async def upload_document(file: UploadFile = File(...), user: dict = Depends(req
     with target.open("wb") as out:
         shutil.copyfileobj(file.file, out)
 
-    async with AgentRuntime() as runtime:
+    async with AgentRuntime(tenant_id=user.get("tenant_id", "default")) as runtime:
         result = await ingest_document(runtime.storage_manager, target)
 
     db.upsert_document(
@@ -76,7 +77,7 @@ async def upload_document(file: UploadFile = File(...), user: dict = Depends(req
 
 @router.delete("/documents/{doc_id}")
 async def remove_document(doc_id: str, user: dict = Depends(require_admin)) -> dict:
-    async with AgentRuntime() as runtime:
+    async with AgentRuntime(tenant_id=user.get("tenant_id", "default")) as runtime:
         result = await delete_document(runtime.storage_manager, doc_id)
     db.delete_document_record(doc_id)
     return result
@@ -97,11 +98,17 @@ def knowledge_gaps(user: dict = Depends(require_admin)) -> list[dict]:
     return db.list_knowledge_gaps(limit=50)
 
 
+@router.get("/usage")
+async def usage(date: str | None = None, user: dict = Depends(require_admin)) -> dict:
+    return await get_daily_stats(date)
+
+
 def _public_admin_user(user: dict) -> dict:
     return {
         "id": user.get("id"),
         "username": user.get("username"),
         "role": user.get("role"),
         "enabled": bool(user.get("enabled", 1)),
+        "tenant_id": user.get("tenant_id", "default"),
         "created_at": user.get("created_at", ""),
     }

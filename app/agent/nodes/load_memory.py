@@ -16,7 +16,9 @@ def load_memory_node(
     messages = state.get("messages", [])
     query = messages[-1].content if messages else ""
 
-    # 同步执行异步操作
+    # LangGraph 节点接口限定为同步函数，但 MemoryManager 方法是异步的。
+    # 此处通过 run_until_complete 桥接异步调用。
+    # 注意：若将来 LangGraph 支持 async 节点，应移除该 workaround。
     import asyncio
     try:
         loop = asyncio.get_event_loop()

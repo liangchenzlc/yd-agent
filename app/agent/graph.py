@@ -12,6 +12,7 @@ from app.agent.nodes.summary_worker import summary_worker_node
 from app.agent.nodes.refiner import refiner_node
 from app.agent.nodes.load_memory import load_memory_node
 from app.agent.nodes.save_memory import save_memory_node
+from app.agent.constants import MAX_REFINEMENTS
 from app.agent.storage_manager import StorageManager
 from app.agent.memory.memory_manager import MemoryManager
 from app.agent.tools import ToolRegistry
@@ -35,7 +36,7 @@ def route_to_workers(state: AgentState) -> list[Send]:
 
 def route_after_refiner(state: AgentState):
     """Refiner 之后的条件路由：决定重试还是保存记忆并结束。"""
-    if state.get("refinement_needed") and state.get("refinement_count", 0) < 2:
+    if state.get("refinement_needed") and state.get("refinement_count", 0) < MAX_REFINEMENTS:
         return "supervisor"
     return "save_memory"
 

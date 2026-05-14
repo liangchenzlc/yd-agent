@@ -11,7 +11,7 @@ class FakeEmbeddings:
 @pytest.mark.asyncio
 async def test_store_session_memory_does_not_overwrite_previous_turns(tmp_path):
     manager = MemoryManager(str(tmp_path), embedding_dim=1)
-    await manager.initialize()
+    manager.initialize()
 
     await manager.store_session_memory(
         user_id="alice",

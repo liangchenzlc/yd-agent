@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from app.agent.llm import factory as llm_factory
-from app.agent.prompts import EVALUATOR_PROMPT
+from app.agent.prompts import EVALUATOR_PROMPT, fill_prompt
 from app.agent.eval.eval_manager import EvalManager
 from app.agent.eval.hard_case_miner import generate_golden_answer
 from app.domain.llm_output import EvaluationOutput
@@ -36,10 +36,10 @@ async def run_evaluation(
             worker_results_text = "[无 Worker 执行结果]"
 
         llm = llm_factory.create_llm(temperature=0)
-        prompt = (
-            EVALUATOR_PROMPT.replace("{user_message}", message)
-            .replace("{final_answer}", final_answer)
-            .replace("{worker_results}", worker_results_text)
+        prompt = fill_prompt(EVALUATOR_PROMPT,
+            user_message=message,
+            final_answer=final_answer,
+            worker_results=worker_results_text,
         )
 
         structured_llm = llm.with_structured_output(EvaluationOutput)

@@ -5,8 +5,12 @@ from uuid import uuid4
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 
 from app.agent.state import AgentState
+from app.agent.stats.usage_tracker import estimate_tokens, track_api_call, track_llm_tokens
+from app.agent.storage.redis_cache import redis_cache
 from app.runtime import AgentRuntime
 from app.web.db import db
+
+SESSION_TTL = 3600  # 1 hour cache for session data
 
 
 def _state_from_messages(messages: list[BaseMessage], user_id: str, session_id: str) -> AgentState:
@@ -39,14 +43,31 @@ def _messages_from_history(history: list[dict], new_message: str) -> list[BaseMe
     return messages
 
 
+async def _get_cached_history(session_id: str, user_id: int, limit: int = 20) -> list[dict] | None:
+    cache_key = f"session:{session_id}:history"
+    return await redis_cache.get(cache_key)
+
+
+async def _set_cached_history(session_id: str, history: list[dict]) -> None:
+    cache_key = f"session:{session_id}:history"
+    await redis_cache.set(cache_key, history, ttl=SESSION_TTL)
+
+
 async def run_chat_turn(user: dict, message: str, session_id: str | None = None) -> dict:
     resolved_session_id = session_id or uuid4().hex[:12]
     title = message[:40] or "新会话"
+    tenant_id = user.get("tenant_id", "default")
     db.ensure_session(user["id"], resolved_session_id, title)
-    history = db.list_messages(resolved_session_id, user["id"], limit=20)
+
+    # 优先从 Redis 缓存加载历史，未命中则从 SQLite 加载
+    history = await _get_cached_history(resolved_session_id, user["id"])
+    if history is None:
+        history = db.list_messages(resolved_session_id, user["id"], limit=20)
+        await _set_cached_history(resolved_session_id, history)
+
     messages = _messages_from_history(history, message)
 
-    async with AgentRuntime() as runtime:
+    async with AgentRuntime(tenant_id=tenant_id) as runtime:
         state = _state_from_messages(messages, str(user["id"]), resolved_session_id)
         result = await runtime.graph.ainvoke(state)
 
@@ -55,6 +76,13 @@ async def run_chat_turn(user: dict, message: str, session_id: str | None = None)
     worker_results = result.get("worker_results", [])
     dispatch_reasoning = result.get("dispatch_reasoning", "")
 
+    # 记录用量
+    await track_api_call(user["id"], tenant_id, "/api/chat")
+    input_tokens = estimate_tokens(message)
+    output_tokens = estimate_tokens(answer)
+    await track_llm_tokens(user["id"], "chat", input_tokens, output_tokens)
+
+    # 持久化到 SQLite
     db.add_message(resolved_session_id, user["id"], "user", message)
     db.add_message(resolved_session_id, user["id"], "assistant", answer)
     qa_log = db.add_qa_log(
@@ -67,6 +95,10 @@ async def run_chat_turn(user: dict, message: str, session_id: str | None = None)
         worker_results=worker_results,
         confidence=_infer_confidence(worker_results),
     )
+
+    # 刷新 Redis 缓存
+    updated_history = db.list_messages(resolved_session_id, user["id"], limit=20)
+    await _set_cached_history(resolved_session_id, updated_history)
 
     return {
         "answer": answer,

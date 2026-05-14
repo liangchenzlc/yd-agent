@@ -41,24 +41,22 @@ def collect_chunks_from_relations(
     return []
 
 
-def pick_by_weighted_polling(
+def select_weighted_chunks(
     entity_chunks: list[dict],
     relation_chunks: list[dict],
     vector_chunks: list[dict],
     top_k: int = 20,
 ) -> list[dict]:
-    """加权轮询选择 chunk。
-
-    权重：entity_chunks > relation_chunks > vector_chunks
-    比例：4:3:3
-    """
+    """从多源候选块中按权重比例选择，优先覆盖实体/关系/向量三类来源。"""
+    # 权重设计：实体匹配最精确（0.4），关系和向量辅助补充（各0.3），
+    # 保证检索结果既有精确命中又有广泛覆盖
     all_sources = [
         (entity_chunks, 0.4),
         (relation_chunks, 0.3),
         (vector_chunks, 0.3),
     ]
 
-    # 去重
+    # 去重（同一段文本可能被多路检索同时召回）
     seen = set()
     result = []
     for source, ratio in all_sources:

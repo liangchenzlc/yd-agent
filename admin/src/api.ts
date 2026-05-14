@@ -3,6 +3,7 @@ export type ApiUser = {
   username: string
   role: string
   enabled?: boolean
+  tenant_id: string
   created_at?: string
 }
 

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from app.agent.llm import factory as llm_factory
-from app.agent.prompts import GOLDEN_ANSWER_PROMPT
+from app.agent.prompts import GOLDEN_ANSWER_PROMPT, fill_prompt
 
 
 async def generate_golden_answer(
@@ -31,10 +31,10 @@ async def generate_golden_answer(
     else:
         worker_results_text = "[无 Worker 执行结果]"
 
-    prompt = (
-        GOLDEN_ANSWER_PROMPT.replace("{user_message}", user_message)
-        .replace("{original_answer}", original_answer)
-        .replace("{worker_results}", worker_results_text)
+    prompt = fill_prompt(GOLDEN_ANSWER_PROMPT,
+        user_message=user_message,
+        original_answer=original_answer,
+        worker_results=worker_results_text,
     )
 
     try:

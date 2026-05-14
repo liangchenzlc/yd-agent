@@ -56,6 +56,9 @@ export function AdminLayout({ children }: AdminLayoutProps) {
         <NavLink className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`} to="/users">
           用户管理
         </NavLink>
+        <NavLink className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`} to="/usage">
+          用量统计
+        </NavLink>
         <button className="secondary" onClick={logout}>
           退出登录
         </button>

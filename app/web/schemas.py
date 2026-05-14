@@ -37,6 +37,7 @@ class AdminUserCreateRequest(BaseModel):
     username: str = Field(min_length=2, max_length=64)
     password: str = Field(min_length=1, max_length=128)
     role: str = Field(pattern="^(employee|admin|super_admin)$")
+    tenant_id: str = Field(default="default", max_length=64)
 
 
 class AdminUserUpdateRequest(BaseModel):

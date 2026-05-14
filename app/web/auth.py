@@ -45,6 +45,7 @@ def create_token(user: dict[str, Any]) -> str:
         "sub": user["id"],
         "username": user["username"],
         "role": user["role"],
+        "tenant_id": user.get("tenant_id", "default"),
         "exp": int((datetime.now(timezone.utc) + timedelta(hours=TOKEN_TTL_HOURS)).timestamp()),
     }
     encoded_header = _b64url_json(header)

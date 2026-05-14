@@ -4,6 +4,7 @@ import { HardCasesPage } from './pages/HardCasesPage'
 import { KnowledgeGapsPage } from './pages/KnowledgeGapsPage'
 import { LoginPage } from './pages/LoginPage'
 import { QaLogsPage } from './pages/QaLogsPage'
+import { UsagePage } from './pages/UsagePage'
 import { UsersPage } from './pages/UsersPage'
 
 function RequireAdmin({ children }: { children: React.ReactNode }) {
@@ -52,6 +53,14 @@ export default function App() {
         element={
           <RequireAdmin>
             <UsersPage />
+          </RequireAdmin>
+        }
+      />
+      <Route
+        path="/usage"
+        element={
+          <RequireAdmin>
+            <UsagePage />
           </RequireAdmin>
         }
       />

@@ -1,4 +1,5 @@
 from app.agent.llm import factory as llm_factory
+from app.agent.prompts import fill_prompt
 from app.domain.llm_output import KeywordOutput
 
 KEYWORD_EXTRACTION_PROMPT = """## 角色
@@ -22,7 +23,7 @@ KEYWORD_EXTRACTION_PROMPT = """## 角色
 def extract_keywords(user_message: str) -> dict[str, list[str]]:
     """从用户消息中提取 ll_keywords 和 hl_keywords。"""
     llm = llm_factory.create_llm(temperature=0)
-    prompt = KEYWORD_EXTRACTION_PROMPT.replace("{user_message}", user_message)
+    prompt = fill_prompt(KEYWORD_EXTRACTION_PROMPT, user_message=user_message)
 
     structured_llm = llm.with_structured_output(KeywordOutput)
     result: KeywordOutput = structured_llm.invoke(prompt)

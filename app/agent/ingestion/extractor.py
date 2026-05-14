@@ -5,6 +5,7 @@ from typing import Any
 
 from app.agent.constants import DEFAULT_ENTITY_TYPES, GRAPH_FIELD_SEP
 from app.agent.llm import factory as llm_factory
+from app.agent.prompts import fill_prompt
 from app.domain.llm_output import EntityExtractionOutput
 
 EXTRACT_SYSTEM_PROMPT = """## 角色
@@ -116,25 +117,28 @@ def extract_entities(
     all_entities: list[dict] = []
     all_relationships: list[dict] = []
 
-    system_prompt = EXTRACT_SYSTEM_PROMPT.replace("{entity_types}", "\n".join(f"- {t}" for t in entity_types))
+    system_prompt = fill_prompt(EXTRACT_SYSTEM_PROMPT, entity_types="\n".join(f"- {t}" for t in entity_types))
 
     for chunk in chunks:
         content = chunk["content"]
         source_id = chunk["chunk_id"]
 
-        user_prompt = EXTRACT_USER_PROMPT.replace("{text}", content)
+        user_prompt = fill_prompt(EXTRACT_USER_PROMPT, text=content)
         result = _extract_with_llm(system_prompt, user_prompt)
 
         chunk_entities = _merge_entities([], result.get("entities", []), source_id)
         chunk_relationships = _deduplicate_relationships(result.get("relationships", []))
 
-        # gleaning 轮次
+        # gleaning 轮次：将已提取的实体/关系喂给 LLM 再次检查遗漏，
+        # 适用于 LLM 首轮只提取了部分实体的情况（max_gleaning=1 表示最多补充一轮）
         for _ in range(max_gleaning):
             entities_str = json.dumps(chunk_entities, ensure_ascii=False, indent=2)
             rels_str = json.dumps(chunk_relationships, ensure_ascii=False, indent=2)
-            glean_prompt = GLEAN_PROMPT.replace("{entities_str}", entities_str).replace(
-                "{relationships_str}", rels_str
-            ).replace("{text}", content)
+            glean_prompt = fill_prompt(GLEAN_PROMPT,
+                entities_str=entities_str,
+                relationships_str=rels_str,
+                text=content,
+            )
             glean_result = _extract_with_llm(system_prompt, glean_prompt)
 
             new_entities = glean_result.get("entities", [])

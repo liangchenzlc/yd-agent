@@ -149,7 +149,7 @@ async def ingest_document(
         rollback_document_writes(storage_ctx, resolved_doc_id)
         raise
 
-    await storage_manager.finalize()
+    storage_manager.finalize()
     return {
         "doc_id": resolved_doc_id,
         "ingested": 1,
@@ -209,7 +209,7 @@ async def delete_document(storage_manager: Any, doc_id: str) -> dict[str, Any]:
         if data.get("doc_id") == doc_id:
             graph.delete_node(node_id)
 
-    await storage_manager.finalize()
+    storage_manager.finalize()
     return {"deleted": existed or bool(chunk_keys), "doc_id": doc_id}
 
 

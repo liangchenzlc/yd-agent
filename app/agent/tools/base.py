@@ -163,6 +163,8 @@ def react_loop(
         # 一次 response 只 append 一次，避免重复插入同一条 AIMessage
         messages.append(response)
         for tc in response.tool_calls:
+            # 通过全局注册表执行而非直接调用 lc_tool，保持调用入口统一
+            # （注册表负责异常处理、结果格式化、访问控制）
             result = ToolRegistry.execute_tool(tc["name"], **tc["args"])
             messages.append(ToolMessage(content=result, tool_call_id=tc["id"]))
 

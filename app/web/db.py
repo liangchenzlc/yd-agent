@@ -103,12 +103,13 @@ class WebDatabase:
                 """
             )
             self._ensure_column(conn, "users", "enabled", "integer not null default 1")
+            self._ensure_column(conn, "users", "tenant_id", "text not null default 'default'")
 
-    def create_user(self, username: str, password_hash: str, role: str = "employee") -> dict[str, Any]:
+    def create_user(self, username: str, password_hash: str, role: str = "employee", tenant_id: str = "default") -> dict[str, Any]:
         with self.connect() as conn:
             cur = conn.execute(
-                "insert into users(username, password_hash, role, enabled, created_at) values (?, ?, ?, ?, ?)",
-                (username, password_hash, role, 1, utc_now()),
+                "insert into users(username, password_hash, role, enabled, tenant_id, created_at) values (?, ?, ?, ?, ?, ?)",
+                (username, password_hash, role, 1, tenant_id, utc_now()),
             )
             return self.get_user_by_id(cur.lastrowid, conn=conn)
 
@@ -116,7 +117,7 @@ class WebDatabase:
         with self.connect() as conn:
             rows = conn.execute(
                 """
-                select id, username, role, enabled, created_at
+                select id, username, role, enabled, tenant_id, created_at
                 from users
                 order by id asc
                 """

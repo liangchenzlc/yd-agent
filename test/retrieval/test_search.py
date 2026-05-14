@@ -16,18 +16,18 @@ class FakeVDB:
         return [{"text": "试用期 3-6 个月", "score": self.score, "metadata": {}}]
 
 
-def test_naive_search_uses_low_confidence_threshold(monkeypatch):
-    monkeypatch.setattr(search, "_embed_texts", lambda texts: [[0.1, 0.2]])
+def test_search_by_vector_uses_low_confidence_threshold(monkeypatch):
+    monkeypatch.setattr(search, "_compute_embeddings", lambda texts: [[0.1, 0.2]])
     vdb = FakeVDB()
 
-    results = search.naive_search("入职试用期多长", vdb)
+    results = search.search_by_vector("入职试用期多长", vdb)
 
     assert results == [{"text": "试用期 3-6 个月", "score": 0.42, "metadata": {}}]
     assert vdb.calls[0]["score_threshold"] == search.LOW_CONFIDENCE_THRESHOLD
 
 
 def test_local_search_uses_low_confidence_threshold(monkeypatch):
-    monkeypatch.setattr(search, "_embed_texts", lambda texts: [[0.1, 0.2]])
+    monkeypatch.setattr(search, "_compute_embeddings", lambda texts: [[0.1, 0.2]])
     vdb = FakeVDB()
 
     results = search.local_search(["试用期"], vdb)
@@ -36,11 +36,11 @@ def test_local_search_uses_low_confidence_threshold(monkeypatch):
     assert vdb.calls[0]["score_threshold"] == search.LOW_CONFIDENCE_THRESHOLD
 
 
-def test_naive_search_falls_back_to_one_low_confidence_result(monkeypatch):
-    monkeypatch.setattr(search, "_embed_texts", lambda texts: [[0.1, 0.2]])
+def test_search_by_vector_falls_back_to_one_low_confidence_result(monkeypatch):
+    monkeypatch.setattr(search, "_compute_embeddings", lambda texts: [[0.1, 0.2]])
     vdb = FakeVDB(score=0.1)
 
-    results = search.naive_search("完全不相关的问题", vdb)
+    results = search.search_by_vector("完全不相关的问题", vdb)
 
     assert len(results) == 1
     assert results[0]["metadata"]["low_confidence"] is True

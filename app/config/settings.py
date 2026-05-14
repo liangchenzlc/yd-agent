@@ -40,6 +40,12 @@ class Settings(BaseSettings):
     eval_retention_days: int = 30
     eval_maintenance_interval_hours: int = 6
 
+    # Redis
+    redis_host: str = ""
+    redis_port: int = 6379
+    redis_db: int = 0
+    redis_password: str = ""
+
     # Web
     web_secret_key: str = "change-me-in-production"
 

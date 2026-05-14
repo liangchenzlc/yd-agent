@@ -4,11 +4,12 @@ from typing import Any
 
 from app.agent.retrieval.chunk_picker import (
     collect_chunks_from_entities,
-    pick_by_weighted_polling,
+    select_weighted_chunks,
 )
 from app.agent.retrieval.context_builder import build_context
 from app.agent.retrieval.keywords import extract_keywords
-from app.agent.retrieval.search import global_search, local_search, naive_search
+from app.agent.retrieval.reranker import rerank
+from app.agent.retrieval.search import global_search, local_search, search_by_vector
 from app.agent.storage_manager import StorageManager
 from app.agent.tools.base import BaseTool, as_tool
 
@@ -50,7 +51,7 @@ class SearchTool(BaseTool):
         # 三路搜索
         local_result = local_search(ll_keywords, storage_ctx["entities_vdb"])
         global_result = global_search(hl_keywords, storage_ctx["relationships_vdb"])
-        vector_chunks = naive_search(query, storage_ctx["chunks_vdb"])
+        vector_chunks = search_by_vector(query, storage_ctx["chunks_vdb"])
 
         # 合并实体和关系（去重）
         all_entities = local_result.get("entities", []) + global_result.get("entities", [])
@@ -75,11 +76,14 @@ class SearchTool(BaseTool):
 
         # 加权选块
         entity_chunks = collect_chunks_from_entities(dedup_entities, storage_ctx["text_chunks_kv"])
-        picked_chunks = pick_by_weighted_polling(
+        picked_chunks = select_weighted_chunks(
             entity_chunks=entity_chunks,
             relation_chunks=[],
             vector_chunks=vector_chunks,
         )
+
+        # 重排序：用 rerank 模型对候选块二阶段精排
+        picked_chunks = rerank(query, picked_chunks, top_k=5)
 
         # 构建上下文
         context, _ = build_context(

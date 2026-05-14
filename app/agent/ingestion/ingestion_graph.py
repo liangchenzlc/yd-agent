@@ -5,37 +5,13 @@ import json
 from typing import Any
 
 from langgraph.graph import END, StateGraph
-from typing_extensions import TypedDict
 
+from app.agent.state import DocumentItem, IngestionState
 from app.agent.exceptions import IngestionError
 from app.agent.ingestion.chunker import chunk_text
 from app.agent.ingestion.extractor import extract_entities
 from app.agent.llm.factory import create_embeddings, embed_documents_batched
 from app.agent.storage_manager import StorageManager
-
-
-class Document(TypedDict):
-    id: str
-    content: str
-    metadata: dict
-
-
-class IngestionState(TypedDict):
-    documents: list[Document]  # 待处理的原始文档
-    current_index: int  # 当前处理的文档索引
-    doc_id: str  # 当前文档 ID
-    content: str  # 当前文档内容
-    metadata: dict  # 当前文档元数据
-    is_duplicate: bool  # 是否为重复文档
-    chunks: list[dict]  # 分块结果
-    entities: list[dict]  # 抽取的实体
-    relationships: list[dict]  # 抽取的关系
-    total_ingested: int  # 已摄入文档数
-    total_skipped: int  # 跳过的文档数
-    total_chunks: int  # 总块数
-    total_entities: int  # 总实体数
-    total_relationships: int  # 总关系数
-    error: str | None  # 错误信息
 
 
 def _compute_doc_id(content: str) -> str:

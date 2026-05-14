@@ -15,7 +15,7 @@ class StorageManager:
         self.graph = GraphStore("knowledge", storage_dir)
         self.text_chunks_kv = JsonKVStore("text_chunks", storage_dir)
 
-    async def initialize(self):
+    def initialize(self):
         """加载所有存储。"""
         self.entities_vdb.initialize()
         self.relationships_vdb.initialize()
@@ -23,7 +23,7 @@ class StorageManager:
         self.graph.initialize()
         self.text_chunks_kv.initialize()
 
-    async def finalize(self):
+    def finalize(self):
         """持久化所有存储。"""
         self.entities_vdb.persist()
         self.relationships_vdb.persist()

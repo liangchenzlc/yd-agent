@@ -14,6 +14,42 @@ from app.agent.storage.kv_store import JsonKVStore
 from app.agent.storage.vector_store import FAISSStore
 
 
+def _text_similarity(a: str, b: str) -> float:
+    """基于字符三元组的 Jaccard 相似度，用于检测近似重复的记忆。"""
+    if not a or not b:
+        return 0.0
+    a_grams = {a[i:i+3] for i in range(len(a) - 2)}
+    b_grams = {b[i:i+3] for i in range(len(b) - 2)}
+    if not a_grams or not b_grams:
+        return 0.0
+    intersection = a_grams & b_grams
+    union = a_grams | b_grams
+    return len(intersection) / len(union)
+
+
+def _merge_meta(target: dict, source: dict) -> None:
+    """将 source 的内容合并到 target，保留更高的重要性和最新的时间戳。"""
+    t_meta = target.setdefault("metadata", {})
+    s_meta = source.get("metadata", {})
+
+    # 合并文本
+    target_text = target.get("text", "")
+    source_text = source.get("text", "")
+    if source_text not in target_text:
+        target["text"] = f"{target_text}；{source_text}"
+
+    # 保留更高的重要性
+    t_imp = t_meta.get("importance", 0)
+    s_imp = s_meta.get("importance", 0)
+    t_meta["importance"] = max(t_imp, s_imp)
+
+    # 保留最新的时间戳
+    t_ts = t_meta.get("timestamp", "")
+    s_ts = s_meta.get("timestamp", "")
+    if s_ts > t_ts:
+        t_meta["timestamp"] = s_ts
+
+
 class MemoryManager:
     """记忆管理器：统筹提取、存储、检索和剪枝。"""
 
@@ -23,13 +59,13 @@ class MemoryManager:
         self.user_profiles_kv = JsonKVStore("user_profiles", storage_dir)
         self.conversations_kv = JsonKVStore("conversations", storage_dir)
 
-    async def initialize(self):
+    def initialize(self):
         self.core_memory_vdb.initialize()
         self.working_memory_vdb.initialize()
         self.user_profiles_kv.initialize()
         self.conversations_kv.initialize()
 
-    async def finalize(self):
+    def finalize(self):
         self.core_memory_vdb.persist()
         self.working_memory_vdb.persist()
         self.user_profiles_kv.persist()
@@ -209,6 +245,38 @@ class MemoryManager:
 
         if expired_ids:
             self.working_memory_vdb.delete(expired_ids)
+
+    # ---- 记忆合并 ----
+
+    async def consolidate_memories(self, similarity_threshold: float = 0.85):
+        """合并相似的核心记忆，防止记忆库膨胀。"""
+        # 按用户分组
+        user_groups: dict[str, list[tuple[str, dict]]] = {}
+        for mem_id, meta in list(self.core_memory_vdb._id_to_meta.items()):
+            uid = meta.get("metadata", {}).get("user_id", "")
+            user_groups.setdefault(uid, []).append((mem_id, meta))
+
+        for uid, items in user_groups.items():
+            if len(items) < 2:
+                continue
+            merged_ids: set[str] = set()
+            for i in range(len(items)):
+                if items[i][0] in merged_ids:
+                    continue
+                for j in range(i + 1, len(items)):
+                    if items[j][0] in merged_ids:
+                        continue
+                    sim = _text_similarity(
+                        items[i][1].get("text", ""),
+                        items[j][1].get("text", ""),
+                    )
+                    if sim >= similarity_threshold:
+                        _merge_meta(items[i][1], items[j][1])
+                        merged_ids.add(items[j][0])
+
+            if merged_ids:
+                self.core_memory_vdb.delete(list(merged_ids))
+                self.core_memory_vdb.persist()
 
     # ---- 遗忘 ----
 

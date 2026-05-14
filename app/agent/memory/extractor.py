@@ -1,4 +1,5 @@
 from app.agent.llm import factory as llm_factory
+from app.agent.prompts import fill_prompt
 from app.domain.llm_output import MemoryExtractionOutput
 
 MEMORY_EXTRACTION_PROMPT = """## 角色
@@ -33,9 +34,9 @@ def extract_memories_from_conversation(
 ) -> list[dict]:
     """从对话中提取结构化记忆。"""
     llm = llm_factory.create_llm(temperature=0)
-    prompt = (
-        MEMORY_EXTRACTION_PROMPT.replace("{user_message}", user_message)
-        .replace("{final_answer}", final_answer)
+    prompt = fill_prompt(MEMORY_EXTRACTION_PROMPT,
+        user_message=user_message,
+        final_answer=final_answer,
     )
 
     structured_llm = llm.with_structured_output(MemoryExtractionOutput)

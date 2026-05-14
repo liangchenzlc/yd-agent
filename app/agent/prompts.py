@@ -1,3 +1,10 @@
+def fill_prompt(template: str, **kwargs: str) -> str:
+    """替换模板中的 {placeholder} 占位符。"""
+    for key, value in kwargs.items():
+        template = template.replace(f"{{{key}}}", value)
+    return template
+
+
 SUPERVISOR_PROMPT = """## 角色
 你是多智能体助手的调度主管。你的唯一任务是根据用户消息选择需要执行的 Worker。
 

@@ -2,7 +2,7 @@
 
 ## 项目概述
 
-yd-Agent 是基于 LangGraph 的多智能体企业知识问答系统，支持 CLI 连续对话、Web Chat、管理后台、GraphRAG 知识库检索、Docker 代码执行、文件工具、长期记忆和评估记录查询。
+yd-Agent 是基于 LangGraph 的多智能体企业知识问答系统，支持 Web Chat、管理后台、GraphRAG 知识库检索、Docker 代码执行、文件工具、长期记忆和评估记录查询。
 
 ## 目录树
 
@@ -11,12 +11,10 @@ yd-agent/
 ├── admin/                          # 管理后台 Vite + React + TypeScript 应用
 ├── .env.example                    # 环境变量模板
 ├── .gitignore                      # Git 忽略规则
-├── cli-doc.md                      # CLI 指令清单
 ├── dir-structure.md                # 目录结构说明
 ├── pytest.ini                      # pytest 配置
 ├── README.md                       # 项目说明
 ├── requirements.txt                # Python 依赖清单
-├── yd-agent                        # CLI 可执行入口脚本
 ├── front/                          # 用户端 Vite + React + TypeScript 应用
 ├── app/
 │   ├── __init__.py
@@ -24,9 +22,8 @@ yd-agent/
 │   │   └── routes/
 │   │       ├── user.py             # 用户端 API：/api/xx
 │   │       └── admin.py            # 管理端 API：/api/admin/xx
-│   ├── cli.py                      # argparse 命令解析、Rich 输出、文档摄入命令
 │   ├── runtime.py                  # 初始化 Storage/Memory/Eval/Graph 并负责关闭持久化
-│   ├── services/                   # CLI 和 Web 共用的应用服务
+│   ├── services/                   # 应用服务层
 │   ├── web/                        # FastAPI 应用装配、认证、SQLite 数据层
 │   ├── config/
 │   │   ├── __init__.py
@@ -57,7 +54,6 @@ yd-agent/
     ├── __init__.py
     ├── conftest.py
     ├── helpers.py                  # 共享测试辅助函数
-    ├── cli/                        # CLI 行为测试
     ├── ingestion/                  # 摄入图测试
     ├── memory/                     # 记忆管理测试
     ├── retrieval/                  # 检索策略测试
@@ -70,13 +66,12 @@ yd-agent/
 
 | 路径 | 用途 |
 |------|------|
-| `app/cli.py` | CLI 主入口；定义 `chat`、`documents`、`memory`、`profile`、`eval`、`doctor` 子命令 |
 | `app/web/main.py` | FastAPI 应用入口，只负责初始化和挂载 API 路由 |
 | `app/api/routes/user.py` | 用户端 API，统一使用 `/api/xx` 路径 |
 | `app/api/routes/admin.py` | 管理端 API，统一使用 `/api/admin/xx` 路径，包含文档管理、问答日志、难例池、知识缺口和用户管理 |
 | `app/web/db.py` | SQLite 数据层，保存用户、会话、消息、问答日志、文档记录、反馈和用户启停状态 |
 | `app/services/documents.py` | 文档摄入、列表、统计、删除的共享服务 |
-| `app/runtime.py` | CLI 运行时上下文；统一初始化和持久化存储、记忆、评估、Agent 图 |
+| `app/runtime.py` | 运行时上下文；统一初始化和持久化存储、记忆、评估、Agent 图 |
 | `app/config/settings.py` | 环境变量配置，包含 LLM、Embedding、存储、记忆、Docker、评估配置 |
 | `app/agent/graph.py` | 构建 `load_memory -> supervisor -> workers -> summary -> refiner -> save_memory` 工作流 |
 | `app/agent/prompts.py` | Supervisor、Worker、Summary、Refiner、Evaluator 等 Prompt 模板 |
@@ -94,7 +89,6 @@ yd-agent/
 | 文件 | 用途 |
 |------|------|
 | `README.md` | 项目介绍、快速开始、配置参考和常用命令 |
-| `cli-doc.md` | 当前 CLI 指令、参数、交互模式命令、退出码 |
 | `dir-structure.md` | 当前目录结构和关键模块说明 |
 | `.claude/skills/yd-agent-guide/SKILL.md` | 面向本项目的本地 Codex/Claude 技能说明 |
 
@@ -103,14 +97,13 @@ yd-agent/
 | 路径 | 用途 |
 |------|------|
 | `data/storage/` | 本地持久化数据目录，包含 FAISS index、JSON KV、图数据和评估记录 |
-| `knowledge/` | 本地知识库示例文档，可通过 `yd-agent documents ingest <path>` 摄入 |
+| `knowledge/` | 本地知识库示例文档，可通过管理后台或 API 摄入 |
 | `docs/` | 项目外的资料或示例文档，不属于运行时代码 |
 
 ## 测试目录
 
 | 路径 | 用途 |
 |------|------|
-| `test/cli/` | CLI 命令测试 |
 | `test/ingestion/` | ingestion graph 的重复判断和状态清理测试 |
 | `test/memory/` | 记忆 ID 唯一化和存储行为测试 |
 | `test/retrieval/` | chunk 反查、低阈值召回和低置信度兜底测试 |

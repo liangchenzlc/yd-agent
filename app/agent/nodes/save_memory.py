@@ -29,7 +29,9 @@ def save_memory_node(
     threshold = settings.memory_importance_threshold
     significant = [m for m in memories if m.get("importance", 0) >= threshold or m.get("type") == "fact"]
 
-    # 事件循环
+    # LangGraph 节点接口限定为同步函数，但 MemoryManager 方法是异步的。
+    # 此处通过 run_until_complete 桥接异步调用。
+    # 注意：若将来 LangGraph 支持 async 节点，应移除该 workaround。
     import asyncio
     try:
         loop = asyncio.get_event_loop()

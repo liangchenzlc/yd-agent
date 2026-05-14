@@ -142,6 +142,11 @@ class FAISSStore:
         return ids
 
     def _rebuild_from_meta(self, items: dict[str, dict]):
+        """基于元数据重建 FAISS 索引。
+
+        FAISS IndexFlatIP 不支持单条删除，因此删除操作只能重建索引。
+        重建时优先使用缓存的 embedding，缺失时从旧索引 reconstruct 恢复。
+        """
         import faiss
 
         new_index = faiss.IndexFlatIP(self.embedding_dim)

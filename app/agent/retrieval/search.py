@@ -8,8 +8,8 @@ from app.agent.storage.vector_store import FAISSStore
 LOW_CONFIDENCE_THRESHOLD = 0.25
 
 
-def _embed_texts(texts: list[str]) -> list[list[float]]:
-    """批量嵌入文本。"""
+def _compute_embeddings(texts: list[str]) -> list[list[float]]:
+    """批量计算文本嵌入向量。"""
     emb = create_embeddings()
     return embed_documents_batched(emb, texts) if texts else []
 
@@ -24,7 +24,7 @@ def local_search(
         return {"entities": [], "relations": []}
 
     query = " ".join(keywords)
-    emb = _embed_texts([query])[0]
+    emb = _compute_embeddings([query])[0]
     results = _search_with_low_confidence_fallback(entities_vdb, emb, top_k)
     return {"entities": results, "relations": []}
 
@@ -39,12 +39,12 @@ def global_search(
         return {"entities": [], "relations": []}
 
     query = " ".join(keywords)
-    emb = _embed_texts([query])[0]
+    emb = _compute_embeddings([query])[0]
     results = _search_with_low_confidence_fallback(relationships_vdb, emb, top_k)
     return {"entities": [], "relations": results}
 
 
-def naive_search(
+def search_by_vector(
     query: str,
     chunks_vdb: FAISSStore,
     top_k: int = 10,
@@ -53,7 +53,7 @@ def naive_search(
     if chunks_vdb.is_empty():
         return []
 
-    emb = _embed_texts([query])[0]
+    emb = _compute_embeddings([query])[0]
     return _search_with_low_confidence_fallback(chunks_vdb, emb, top_k)
 
 
@@ -62,6 +62,11 @@ def _search_with_low_confidence_fallback(
     embedding: list[float],
     top_k: int,
 ) -> list[dict]:
+    """先用低阈值召回，无结果时降级为取最相似的一个并标记低置信度。
+
+    这种兜底策略确保检索不会因为阈值过于严格就完全无返回，
+    让下游 LLM 能感知到结果置信度，减少"未找到信息"的误判。
+    """
     results = store.similarity_search_by_vector(
         embedding,
         k=top_k,
@@ -70,6 +75,7 @@ def _search_with_low_confidence_fallback(
     if results:
         return results
 
+    # 无匹配结果时降级：返回最相似的 1 条并打标，让 LLM 自行判断可用性
     fallback = store.similarity_search_by_vector(embedding, k=1, score_threshold=None)
     marked = []
     for item in fallback:

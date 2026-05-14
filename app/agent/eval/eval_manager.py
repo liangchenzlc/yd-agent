@@ -16,7 +16,7 @@ class EvalManager:
         self.feedback_kv = JsonKVStore("feedback", storage_dir)
         self.eval_stats_kv = JsonKVStore("eval_stats", storage_dir)
 
-    async def initialize(self):
+    def initialize(self):
         self.eval_runs_kv.initialize()
         self.hard_cases_kv.initialize()
         self.feedback_kv.initialize()
@@ -25,7 +25,7 @@ class EvalManager:
         if self.eval_stats_kv.get_by_id("global") is None:
             self._reset_stats()
 
-    async def finalize(self):
+    def finalize(self):
         self.eval_runs_kv.persist()
         self.hard_cases_kv.persist()
         self.feedback_kv.persist()

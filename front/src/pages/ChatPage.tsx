@@ -1,7 +1,7 @@
-import { type FormEvent, type KeyboardEvent, useCallback, useEffect, useState } from 'react'
+import { type FormEvent, type KeyboardEvent, useCallback, useEffect, useRef, useState } from 'react'
 import { useDispatch, useSelector } from 'react-redux'
 import { useNavigate } from 'react-router-dom'
-import { api, type ApiUser, type ChatMessage, type ChatSession } from '../api'
+import { api, chatStreamSSE, type ApiUser, type ChatMessage, type ChatSession } from '../api'
 import {
   addMessage,
   clearAuth,
@@ -26,6 +26,10 @@ export function ChatPage() {
   const { sessionId, sessions, messages } = useSelector((state: RootState) => state.chat)
   const { user } = useSelector((state: RootState) => state.auth)
   const [text, setText] = useState('')
+  const [streaming, setStreaming] = useState(false)
+  const [streamContent, setStreamContent] = useState('')
+  const [thinkingStatus, setThinkingStatus] = useState('')
+  const abortRef = useRef<(() => void) | null>(null)
 
   const logout = useCallback(() => {
     dispatch(clearAuth())
@@ -53,12 +57,18 @@ export function ChatPage() {
     refreshSessions()
   }, [loadMe, refreshSessions])
 
+  useEffect(() => {
+    return () => abortRef.current?.()
+  }, [])
+
   async function loadSession(id: string) {
+    abortRef.current?.()
     dispatch(setSessionId(id))
     dispatch(setMessages(await api<ChatMessage[]>(`/api/sessions/${id}/messages`)))
   }
 
   function newSession() {
+    abortRef.current?.()
     dispatch(setSessionId(''))
     dispatch(setMessages([]))
   }
@@ -66,22 +76,50 @@ export function ChatPage() {
   async function sendMessage(event?: FormEvent<HTMLFormElement>) {
     event?.preventDefault()
     const message = text.trim()
-    if (!message) return
+    if (!message || streaming) return
     dispatch(addMessage({ role: 'user', content: message }))
     setText('')
+    setStreaming(true)
+    setStreamContent('')
+    setThinkingStatus('正在分析消息...')
 
-    try {
-      const result = await api<ChatResponse>('/api/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message, session_id: sessionId || null }),
-      })
-      dispatch(setSessionId(result.session_id))
-      dispatch(addMessage({ role: 'assistant', content: result.answer || '（无回答）', qaLogId: result.qa_log_id }))
-      refreshSessions()
-    } catch (err) {
-      dispatch(addMessage({ role: 'assistant', content: err instanceof Error ? err.message : '请求失败' }))
-    }
+    let currentSessionId = sessionId
+    let accumulatedAnswer = ''
+
+    abortRef.current = chatStreamSSE(
+      message,
+      currentSessionId,
+      (event) => {
+        if (event.type === 'supervisor' && event.workers) {
+          setThinkingStatus(`调度 Worker: ${event.workers.join(', ')}`)
+        } else if (event.type === 'worker' && event.worker) {
+          setThinkingStatus(`运行中: ${event.worker}`)
+        } else if (event.type === 'summary' && event.content) {
+          accumulatedAnswer = event.content
+          setStreamContent(accumulatedAnswer)
+          setThinkingStatus('')
+        } else if (event.type === 'refiner') {
+          setThinkingStatus(event.passed ? '质量检查通过' : `正在优化: ${event.feedback?.slice(0, 60)}`)
+        } else if (event.type === 'meta' && event.session_id) {
+          currentSessionId = event.session_id
+        }
+      },
+      (error) => {
+        setStreaming(false)
+        setThinkingStatus('')
+        dispatch(addMessage({ role: 'assistant', content: error }))
+      },
+      (doneSessionId) => {
+        setStreaming(false)
+        setThinkingStatus('')
+        dispatch(setSessionId(doneSessionId))
+        if (accumulatedAnswer) {
+          dispatch(addMessage({ role: 'assistant', content: accumulatedAnswer }))
+        }
+        setStreamContent('')
+        refreshSessions()
+      },
+    )
   }
 
   function onComposerKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
@@ -145,6 +183,13 @@ export function ChatPage() {
               )}
             </article>
           ))}
+          {streaming && (
+            <article className="message assistant">
+              {thinkingStatus && <div className="thinking-status">{thinkingStatus}</div>}
+              {streamContent && <div>{streamContent}</div>}
+              {!streamContent && <div className="cursor-blink">▊</div>}
+            </article>
+          )}
         </section>
         <form className="composer" onSubmit={sendMessage}>
           <textarea
@@ -153,8 +198,11 @@ export function ChatPage() {
             placeholder="询问企业制度、流程、IT 或 HR 问题"
             onChange={(event) => setText(event.target.value)}
             onKeyDown={onComposerKeyDown}
+            disabled={streaming}
           />
-          <button type="submit">发送</button>
+          <button type="submit" disabled={streaming || !text.trim()}>
+            {streaming ? '处理中' : '发送'}
+          </button>
         </form>
       </main>
     </div>

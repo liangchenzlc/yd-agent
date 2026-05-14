@@ -165,6 +165,22 @@ button.secondary {
   line-height: 1.55;
 }
 
+.message .thinking-status {
+  color: var(--muted);
+  font-size: 13px;
+  margin-bottom: 8px;
+  font-family: monospace;
+}
+
+.message .cursor-blink {
+  color: var(--muted);
+  animation: blink 1s steps(1) infinite;
+}
+
+@keyframes blink {
+  50% { opacity: 0; }
+}
+
 .message.user {
   background: #edf4ff;
   border-color: #c8dafb;

@@ -1,5 +1,5 @@
 from app.agent.state import AgentState
-from app.agent.prompts import REFINER_PROMPT
+from app.agent.prompts import REFINER_PROMPT, fill_prompt
 from app.agent.llm import factory as llm_factory
 from app.agent.constants import ALL_WORKERS, REFINER_SCORE_THRESHOLD, MAX_REFINEMENTS
 from app.domain.llm_output import RefinerOutput
@@ -23,9 +23,12 @@ def refiner_node(state: AgentState) -> dict:
         for r in worker_results
     ) if worker_results else "[无]"
 
-    prompt = REFINER_PROMPT.replace("{user_message}", user_message).replace(
-        "{worker_results}", results_text
-    ).replace("{final_answer}", final_answer).replace("{refinement_count}", str(refinement_count))
+    prompt = fill_prompt(REFINER_PROMPT,
+        user_message=user_message,
+        worker_results=results_text,
+        final_answer=final_answer,
+        refinement_count=str(refinement_count),
+    )
 
     try:
         structured_llm = llm.with_structured_output(RefinerOutput)

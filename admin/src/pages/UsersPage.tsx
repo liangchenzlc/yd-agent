@@ -12,6 +12,7 @@ export function UsersPage() {
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [role, setRole] = useState('employee')
+  const [tenantId, setTenantId] = useState('default')
   const [message, setMessage] = useState('')
   const [busy, setBusy] = useState(false)
 
@@ -34,11 +35,12 @@ export function UsersPage() {
       await api('/api/admin/users', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, password, role }),
+        body: JSON.stringify({ username, password, role, tenant_id: tenantId }),
       })
       setUsername('')
       setPassword('')
       setRole('employee')
+      setTenantId('default')
       setMessage('用户已创建')
       await loadUsers()
     } catch (err) {
@@ -97,6 +99,11 @@ export function UsersPage() {
               <option value={item} key={item}>{item}</option>
             ))}
           </select>
+          <input
+            value={tenantId}
+            placeholder="租户 ID"
+            onChange={(event) => setTenantId(event.target.value)}
+          />
           <button type="submit" disabled={busy}>创建</button>
         </form>
         {message && <div className="status">{message}</div>}
@@ -112,6 +119,7 @@ export function UsersPage() {
             <span>ID</span>
             <span>用户名</span>
             <span>角色</span>
+            <span>租户</span>
             <span>状态</span>
             <span>创建时间</span>
           </div>
@@ -130,6 +138,7 @@ export function UsersPage() {
                   ))}
                 </select>
               </span>
+              <span className="mono">{user.tenant_id}</span>
               <span>
                 <button
                   className={user.enabled === false ? 'secondary' : 'danger'}

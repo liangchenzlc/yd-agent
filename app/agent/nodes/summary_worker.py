@@ -1,6 +1,6 @@
 from app.agent.state import AgentState
 from app.agent.conversation import format_conversation_context
-from app.agent.prompts import SUMMARY_PROMPT
+from app.agent.prompts import SUMMARY_PROMPT, fill_prompt
 from app.agent.llm import factory as llm_factory
 from app.agent.memory.retriever import format_memory_context, format_profile_context
 
@@ -34,12 +34,12 @@ def summary_worker_node(state: AgentState) -> dict:
     user_profile_section = format_profile_context(state.get("user_profile", {}))
     memory_section = format_memory_context(state.get("relevant_memories", []))
 
-    prompt = (
-        SUMMARY_PROMPT.replace("{user_profile_section}", user_profile_section)
-        .replace("{memory_section}", memory_section)
-        .replace("{user_message}", user_message)
-        .replace("{conversation_context}", format_conversation_context(messages))
-        .replace("{worker_results}", results_text)
+    prompt = fill_prompt(SUMMARY_PROMPT,
+        user_profile_section=user_profile_section,
+        memory_section=memory_section,
+        user_message=user_message,
+        conversation_context=format_conversation_context(messages),
+        worker_results=results_text,
     )
     response = llm.invoke(prompt)
     final_answer = response.content if hasattr(response, "content") else str(response)
