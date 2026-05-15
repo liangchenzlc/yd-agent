@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any, Callable
 
 from app.config.settings import get_settings
+
+logger = logging.getLogger(__name__)
 
 
 class RedisCache:
@@ -16,6 +19,7 @@ class RedisCache:
     def initialize(self):
         settings = get_settings()
         if not settings.redis_host:
+            logger.info("Redis not configured — running without cache")
             return
         try:
             import redis.asyncio as aioredis
@@ -31,6 +35,7 @@ class RedisCache:
             )
             self._enabled = True
         except Exception:
+            logger.warning("Redis connection failed — running without cache", exc_info=True)
             self._enabled = False
 
     async def get(self, key: str) -> Any | None:
@@ -41,6 +46,7 @@ class RedisCache:
             if val is not None:
                 return json.loads(val)
         except Exception:
+            logger.warning("Redis GET failed (key=%s)", key, exc_info=True)
             return None
 
     async def set(self, key: str, value: Any, ttl: int = 300) -> None:
@@ -49,7 +55,7 @@ class RedisCache:
         try:
             await self._client.setex(key, ttl, json.dumps(value, ensure_ascii=False))
         except Exception:
-            pass
+            logger.warning("Redis SET failed (key=%s)", key, exc_info=True)
 
     async def delete(self, key: str) -> None:
         if not self._enabled:
@@ -57,7 +63,7 @@ class RedisCache:
         try:
             await self._client.delete(key)
         except Exception:
-            pass
+            logger.warning("Redis DELETE failed (key=%s)", key, exc_info=True)
 
     async def get_or_compute(self, key: str, factory: Callable, ttl: int = 300) -> Any:
         cached = await self.get(key)
@@ -75,15 +81,17 @@ class RedisCache:
             await self._client.expire(key, ttl)
             return val
         except Exception:
+            logger.warning("Redis INCR failed (key=%s)", key, exc_info=True)
             return None
 
     def close(self):
         if self._enabled and self._client:
             try:
                 import asyncio
+
                 asyncio.ensure_future(self._client.aclose())
             except Exception:
-                pass
+                logger.warning("Redis close failed", exc_info=True)
             self._enabled = False
 
 

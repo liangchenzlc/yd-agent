@@ -167,10 +167,8 @@ def list_documents(storage_manager: Any) -> list[dict[str, Any]]:
         doc_id = doc_key.replace("doc_meta:", "")
         meta = storage_ctx["text_chunks_kv"].get_by_id(doc_key) or {}
         chunks = len([key for key in storage_ctx["text_chunks_kv"].keys() if key.startswith(f"chunk:{doc_id}_")])
-        entities = sum(
-            1
-            for item in storage_ctx["entities_vdb"]._id_to_meta.values()
-            if item.get("metadata", {}).get("doc_id") == doc_id
+        entities = len(
+            storage_ctx["entities_vdb"].get_meta_by_metadata_value("doc_id", doc_id)
         )
         documents.append(
             {

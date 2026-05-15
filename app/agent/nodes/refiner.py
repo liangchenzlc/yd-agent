@@ -1,8 +1,14 @@
+from __future__ import annotations
+
+import logging
+
 from app.agent.state import AgentState
 from app.agent.prompts import REFINER_PROMPT, fill_prompt
 from app.agent.llm import factory as llm_factory
 from app.agent.constants import ALL_WORKERS, REFINER_SCORE_THRESHOLD, MAX_REFINEMENTS
 from app.domain.llm_output import RefinerOutput
+
+logger = logging.getLogger(__name__)
 
 
 def refiner_node(state: AgentState) -> dict:
@@ -34,6 +40,7 @@ def refiner_node(state: AgentState) -> dict:
         structured_llm = llm.with_structured_output(RefinerOutput)
         result: RefinerOutput = structured_llm.invoke(prompt)
     except Exception:
+        logger.warning("Refiner LLM call failed, defaulting to pass (score=7)", exc_info=True)
         result = RefinerOutput(score=7)  # 解析失败时默认通过
 
     retarget = [w for w in result.retarget_workers if w in ALL_WORKERS]

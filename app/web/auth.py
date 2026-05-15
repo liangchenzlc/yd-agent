@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-import base64
 import hashlib
 import hmac
-import json
 import secrets
+import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+import jwt
 from fastapi import Cookie, Depends, Header, HTTPException, status
 
 from app.config.settings import get_settings
@@ -18,10 +18,11 @@ TOKEN_TTL_HOURS = 24
 JWT_ALGORITHM = "HS256"
 
 
-def _secret() -> bytes:
-    settings = get_settings()
-    raw = settings.web_secret_key or settings.llm_api_key or "yd-agent-dev-secret"
-    return raw.encode("utf-8")
+def _secret() -> str:
+    key = get_settings().web_secret_key
+    if not key:
+        raise RuntimeError("WEB_SECRET_KEY is not configured. Set it in .env before starting the server.")
+    return key
 
 
 def hash_password(password: str, salt: str | None = None) -> str:
@@ -40,43 +41,28 @@ def verify_password(password: str, password_hash: str) -> bool:
 
 
 def create_token(user: dict[str, Any]) -> str:
-    header = {"alg": JWT_ALGORITHM, "typ": "JWT"}
+    now = datetime.now(timezone.utc)
     payload = {
-        "sub": user["id"],
+        "sub": str(user["id"]),
         "username": user["username"],
         "role": user["role"],
         "tenant_id": user.get("tenant_id", "default"),
-        "exp": int((datetime.now(timezone.utc) + timedelta(hours=TOKEN_TTL_HOURS)).timestamp()),
+        "iat": now,
+        "nbf": now,
+        "exp": now + timedelta(hours=TOKEN_TTL_HOURS),
+        "jti": uuid.uuid4().hex,
     }
-    encoded_header = _b64url_json(header)
-    encoded_payload = _b64url_json(payload)
-    signing_input = f"{encoded_header}.{encoded_payload}"
-    signature = _b64url(hmac.new(_secret(), signing_input.encode("ascii"), hashlib.sha256).digest())
-    return f"{signing_input}.{signature}"
+    return jwt.encode(payload, _secret(), algorithm=JWT_ALGORITHM)
 
 
 def decode_token(token: str) -> dict[str, Any]:
     try:
-        encoded_header, encoded_payload, signature = token.split(".", 2)
-    except ValueError as exc:
+        payload = jwt.decode(token, _secret(), algorithms=[JWT_ALGORITHM])
+        return payload
+    except jwt.ExpiredSignatureError as exc:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token expired") from exc
+    except jwt.InvalidTokenError as exc:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token") from exc
-
-    signing_input = f"{encoded_header}.{encoded_payload}"
-    expected = _b64url(hmac.new(_secret(), signing_input.encode("ascii"), hashlib.sha256).digest())
-    if not hmac.compare_digest(signature, expected):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
-
-    try:
-        header = json.loads(_b64url_decode(encoded_header))
-        payload = json.loads(_b64url_decode(encoded_payload))
-    except Exception as exc:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token") from exc
-
-    if header.get("alg") != JWT_ALGORITHM or header.get("typ") != "JWT":
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
-    if float(payload.get("exp", 0)) < datetime.now(timezone.utc).timestamp():
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token expired")
-    return payload
 
 
 def get_current_user(

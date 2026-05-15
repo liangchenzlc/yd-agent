@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from datetime import datetime, timedelta, timezone
 
 from app.agent.memory.memory_manager import MemoryManager
+
+logger = logging.getLogger(__name__)
 
 
 async def prune_expired_memories(memory_manager: MemoryManager):
@@ -18,4 +21,4 @@ async def schedule_pruning(memory_manager: MemoryManager, interval_seconds: int 
         try:
             await prune_expired_memories(memory_manager)
         except Exception:
-            pass
+            logger.warning("Memory pruning task failed", exc_info=True)

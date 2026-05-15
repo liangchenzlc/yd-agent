@@ -4,7 +4,7 @@ import shutil
 from pathlib import Path
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, File, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 
 from app.agent.stats.usage_tracker import get_daily_stats
 from app.config.settings import get_settings
@@ -13,6 +13,65 @@ from app.services.documents import delete_document, ingest_document, list_docume
 from app.web.auth import hash_password, require_admin
 from app.web.db import db
 from app.web.schemas import AdminUserCreateRequest, AdminUserUpdateRequest
+
+router = APIRouter(prefix="/api/admin", tags=["admin"])
+
+ALLOWED_MIME_TYPES = {
+    "application/pdf",
+    "text/plain",
+    "text/markdown",
+    "application/json",
+    "text/csv",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/msword",
+}
+MAX_FILE_SIZE = 50 * 1024 * 1024  # 50 MB
+
+
+def _validate_upload(file: UploadFile) -> None:
+    """验证上传文件：Content-Type、大小、magic bytes。"""
+    if file.content_type not in ALLOWED_MIME_TYPES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"不支持的文件类型: {file.content_type}。允许: {', '.join(sorted(ALLOWED_MIME_TYPES))}",
+        )
+
+    head = file.file.read(8192)
+    if len(head) == 0:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="文件为空")
+
+    _check_magic_bytes(head, file.content_type)
+
+    remaining = file.file.read()
+    total = len(head) + len(remaining)
+    if total > MAX_FILE_SIZE:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=f"文件过大 ({total / 1024 / 1024:.1f} MB)，最大允许 {MAX_FILE_SIZE / 1024 / 1024:.0f} MB",
+        )
+
+    file.file.seek(0)
+
+
+def _check_magic_bytes(head: bytes, mime: str) -> None:
+    """常见文档格式的 magic bytes 检查。"""
+    magic_map = {
+        "application/pdf": [(b"%PDF", 0)],
+        "application/msword": [(b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1", 0)],
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document": [
+            (b"PK\x03\x04", 0),
+        ],
+    }
+    checks = magic_map.get(mime, [])
+    if not checks:
+        return  # text/plain, text/markdown 等跳过
+
+    for magic_bytes, offset in checks:
+        if head[offset:offset + len(magic_bytes)] != magic_bytes:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"文件类型不匹配（预期 {mime}，但内容签名不一致）",
+            )
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 
@@ -50,6 +109,7 @@ async def documents(user: dict = Depends(require_admin)) -> list[dict]:
 
 @router.post("/documents")
 async def upload_document(file: UploadFile = File(...), user: dict = Depends(require_admin)) -> dict:
+    _validate_upload(file)
     settings = get_settings()
     upload_dir = Path(settings.storage_dir) / "uploads"
     upload_dir.mkdir(parents=True, exist_ok=True)

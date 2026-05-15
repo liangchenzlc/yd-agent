@@ -233,7 +233,7 @@ class MemoryManager:
 
         expired_ids = []
         # 检查工作记忆的元数据
-        for mem_id, meta in list(self.working_memory_vdb._id_to_meta.items()):
+        for mem_id, meta in list(self.working_memory_vdb.get_all_meta_items()):
             ts_str = meta.get("metadata", {}).get("timestamp", "")
             if ts_str:
                 try:
@@ -252,7 +252,7 @@ class MemoryManager:
         """合并相似的核心记忆，防止记忆库膨胀。"""
         # 按用户分组
         user_groups: dict[str, list[tuple[str, dict]]] = {}
-        for mem_id, meta in list(self.core_memory_vdb._id_to_meta.items()):
+        for mem_id, meta in list(self.core_memory_vdb.get_all_meta_items()):
             uid = meta.get("metadata", {}).get("user_id", "")
             user_groups.setdefault(uid, []).append((mem_id, meta))
 
@@ -285,8 +285,8 @@ class MemoryManager:
         # KV 删除
         self.user_profiles_kv.mdelete([user_id])
         # FAISS 删除——收集该用户的记忆 ID
-        core_ids = [k for k, v in self.core_memory_vdb._id_to_meta.items() if v.get("metadata", {}).get("user_id") == user_id]
-        working_ids = [k for k, v in self.working_memory_vdb._id_to_meta.items() if v.get("metadata", {}).get("user_id") == user_id]
+        core_ids = [k for k, v in self.core_memory_vdb.get_all_meta_items() if v.get("metadata", {}).get("user_id") == user_id]
+        working_ids = [k for k, v in self.working_memory_vdb.get_all_meta_items() if v.get("metadata", {}).get("user_id") == user_id]
         self.core_memory_vdb.delete(core_ids)
         self.working_memory_vdb.delete(working_ids)
 

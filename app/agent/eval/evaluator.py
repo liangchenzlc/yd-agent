@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timezone
 
 from app.agent.llm import factory as llm_factory
@@ -7,6 +8,8 @@ from app.agent.prompts import EVALUATOR_PROMPT, fill_prompt
 from app.agent.eval.eval_manager import EvalManager
 from app.agent.eval.hard_case_miner import generate_golden_answer
 from app.domain.llm_output import EvaluationOutput
+
+logger = logging.getLogger(__name__)
 
 
 async def run_evaluation(
@@ -101,4 +104,5 @@ async def run_evaluation(
         return {"run_id": run_id, "overall_score": overall_score, "is_hard_case": is_hard_case}
 
     except Exception:
+        logger.warning("LLM evaluation failed", exc_info=True)
         return None

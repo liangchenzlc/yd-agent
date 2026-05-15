@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 
 from app.agent.eval.eval_manager import EvalManager
+
+logger = logging.getLogger(__name__)
 
 
 async def schedule_eval_maintenance(
@@ -18,4 +21,4 @@ async def schedule_eval_maintenance(
             await eval_manager.purge_expired_runs(retention_days)
             await eval_manager.cap_max_runs(max_runs)
         except Exception:
-            pass
+            logger.warning("Eval maintenance task failed", exc_info=True)

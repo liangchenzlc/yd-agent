@@ -38,7 +38,7 @@ def test_delete_by_metadata_removes_matching_items(tmp_path):
     deleted = store.delete_by_metadata("doc_id", "same")
 
     assert deleted == ["a"]
-    assert list(store._id_to_meta.keys()) == ["b"]
+    assert [k for k, _ in store.get_all_meta_items()] == ["b"]
 
 
 def test_add_texts_replaces_existing_id_without_orphan_vector(tmp_path):

@@ -141,6 +141,17 @@ class FAISSStore:
             self.delete(ids)
         return ids
 
+    def get_meta_by_metadata_value(self, key: str, value) -> list[tuple[str, dict]]:
+        """返回所有匹配指定元数据字段的 (id, meta) 列表。"""
+        return [
+            (k, v) for k, v in self._id_to_meta.items()
+            if v.get("metadata", {}).get(key) == value
+        ]
+
+    def get_all_meta_items(self) -> list[tuple[str, dict]]:
+        """返回所有 (id, meta) 对。"""
+        return list(self._id_to_meta.items())
+
     def _rebuild_from_meta(self, items: dict[str, dict]):
         """基于元数据重建 FAISS 索引。
 

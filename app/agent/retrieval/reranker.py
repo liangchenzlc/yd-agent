@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any
 from urllib.request import Request, urlopen
 
 from app.config.settings import get_settings
+
+logger = logging.getLogger(__name__)
 
 
 def rerank(query: str, documents: list[dict], top_k: int = 5) -> list[dict]:
@@ -55,6 +58,7 @@ def rerank(query: str, documents: list[dict], top_k: int = 5) -> list[dict]:
         return ranked[:top_k]
 
     except Exception:
+        logger.warning("Rerank API call failed, falling back to original order", exc_info=True)
         return documents[:top_k]
 
 

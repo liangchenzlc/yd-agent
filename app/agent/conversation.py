@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import logging
+
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 
 from app.config.settings import get_settings
+
+logger = logging.getLogger(__name__)
 
 
 def format_conversation_context(messages: list[BaseMessage], limit: int = 8) -> str:
@@ -47,7 +51,7 @@ def _compress(messages: list[BaseMessage]) -> str:
             summary = resp.content if hasattr(resp, "content") else str(resp)
             return f"【历史对话概要】{summary.strip()}"
     except Exception:
-        pass
+        logger.warning("LLM conversation compression failed", exc_info=True)
 
     return f"【省略了前面 {count} 轮对话】"
 

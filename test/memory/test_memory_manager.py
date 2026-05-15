@@ -27,9 +27,9 @@ async def test_store_session_memory_does_not_overwrite_previous_turns(tmp_path):
     )
 
     assert len(manager.core_memory_vdb) == 2
-    texts = {meta["text"] for meta in manager.core_memory_vdb._id_to_meta.values()}
+    texts = {meta["text"] for _, meta in manager.core_memory_vdb.get_all_meta_items()}
     assert texts == {"fact: 第一条", "fact: 第二条"}
     assert all(
         meta["metadata"]["session_id"] == "s1"
-        for meta in manager.core_memory_vdb._id_to_meta.values()
+        for _, meta in manager.core_memory_vdb.get_all_meta_items()
     )

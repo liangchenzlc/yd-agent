@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import logging
+
 from app.agent.llm import factory as llm_factory
 from app.agent.prompts import GOLDEN_ANSWER_PROMPT, fill_prompt
+
+logger = logging.getLogger(__name__)
 
 
 async def generate_golden_answer(
@@ -42,4 +46,5 @@ async def generate_golden_answer(
         response = await llm.ainvoke(prompt)
         return response.content if hasattr(response, "content") else str(response)
     except Exception:
+        logger.warning("Golden answer generation failed", exc_info=True)
         return ""

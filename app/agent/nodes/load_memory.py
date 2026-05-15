@@ -4,7 +4,7 @@ from app.agent.memory.retriever import format_memory_context, format_profile_con
 from app.agent.state import AgentState
 
 
-def load_memory_node(
+async def load_memory_node(
     state: AgentState,
     memory_manager: MemoryManager | None = None,
 ) -> dict:
@@ -16,29 +16,19 @@ def load_memory_node(
     messages = state.get("messages", [])
     query = messages[-1].content if messages else ""
 
-    # LangGraph 节点接口限定为同步函数，但 MemoryManager 方法是异步的。
-    # 此处通过 run_until_complete 桥接异步调用。
-    # 注意：若将来 LangGraph 支持 async 节点，应移除该 workaround。
-    import asyncio
-    try:
-        loop = asyncio.get_event_loop()
-    except RuntimeError:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-
     # 加载画像
-    profile = loop.run_until_complete(memory_manager.get_user_profile(user_id)) or {}
+    profile = (await memory_manager.get_user_profile(user_id)) or {}
 
     # 检索相关记忆
     embeddings_api = llm_factory.create_embeddings()
     relevant = (
-        loop.run_until_complete(memory_manager.get_relevant_memories(user_id, query, embeddings_api))
+        await memory_manager.get_relevant_memories(user_id, query, embeddings_api)
         if query
         else []
     )
 
     # 会话历史
-    session_history = loop.run_until_complete(memory_manager.get_session_history(user_id)) or []
+    session_history = (await memory_manager.get_session_history(user_id)) or []
 
     return {
         "user_profile": profile,
