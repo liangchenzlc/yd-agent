@@ -9,8 +9,8 @@ class FakeEmbeddings:
 
 
 @pytest.mark.asyncio
-async def test_store_session_memory_does_not_overwrite_previous_turns(tmp_path):
-    manager = MemoryManager(str(tmp_path), embedding_dim=1)
+async def test_store_session_memory_does_not_overwrite_previous_turns():
+    manager = MemoryManager()
     manager.initialize()
 
     await manager.store_session_memory(
@@ -26,10 +26,8 @@ async def test_store_session_memory_does_not_overwrite_previous_turns(tmp_path):
         embeddings_api=FakeEmbeddings(),
     )
 
-    assert len(manager.core_memory_vdb) == 2
-    texts = {meta["text"] for _, meta in manager.core_memory_vdb.get_all_meta_items()}
+    assert len(manager.core_memory_kv) == 2
+    entries = manager.core_memory_kv.get_all()
+    texts = {v["text"] for _, v in entries}
     assert texts == {"fact: 第一条", "fact: 第二条"}
-    assert all(
-        meta["metadata"]["session_id"] == "s1"
-        for _, meta in manager.core_memory_vdb.get_all_meta_items()
-    )
+    assert all(v["session_id"] == "s1" for _, v in entries)

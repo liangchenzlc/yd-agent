@@ -1,5 +1,5 @@
 import { configureStore, createSlice, type PayloadAction } from '@reduxjs/toolkit'
-import type { ApiUser, DocumentRecord, HardCaseRecord, KnowledgeGapRecord, QaLogRecord } from './api'
+import type { ApiUser, DocumentRecord, HardCaseRecord, KnowledgeGapRecord, QaLogRecord, ApiTenant } from './api'
 
 type AuthState = {
   token: string
@@ -24,6 +24,10 @@ type KnowledgeGapState = {
 
 type UserState = {
   items: ApiUser[]
+}
+
+type TenantState = {
+  items: ApiTenant[]
 }
 
 const authSlice = createSlice({
@@ -109,12 +113,25 @@ const usersSlice = createSlice({
   },
 })
 
+const tenantsSlice = createSlice({
+  name: 'tenants',
+  initialState: {
+    items: [],
+  } as TenantState,
+  reducers: {
+    setTenants(state, action: PayloadAction<ApiTenant[]>) {
+      state.items = action.payload
+    },
+  },
+})
+
 export const { setAuth, setUser, clearAuth } = authSlice.actions
 export const { setDocuments } = documentsSlice.actions
 export const { setQaLogs } = qaLogsSlice.actions
 export const { setHardCases } = hardCasesSlice.actions
 export const { setKnowledgeGaps } = knowledgeGapsSlice.actions
 export const { setUsers } = usersSlice.actions
+export const { setTenants } = tenantsSlice.actions
 
 export const store = configureStore({
   reducer: {
@@ -124,6 +141,7 @@ export const store = configureStore({
     hardCases: hardCasesSlice.reducer,
     knowledgeGaps: knowledgeGapsSlice.reducer,
     users: usersSlice.reducer,
+    tenants: tenantsSlice.reducer,
   },
 })
 

@@ -1,17 +1,16 @@
 import { type FormEvent, useCallback, useEffect, useState } from 'react'
 import { useDispatch, useSelector } from 'react-redux'
-import { api, type ApiUser } from '../api'
+import { api, type ApiTenant, type ApiUser } from '../api'
 import { AdminLayout } from '../components/AdminLayout'
-import { type RootState, setUsers } from '../store'
-
-const roles = ['employee', 'admin', 'super_admin']
+import { type RootState, setTenants, setUsers } from '../store'
 
 export function UsersPage() {
   const dispatch = useDispatch()
   const { items } = useSelector((state: RootState) => state.users)
+  const { user: currentUser } = useSelector((state: RootState) => state.auth)
+  const { items: tenants } = useSelector((state: RootState) => state.tenants)
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
-  const [role, setRole] = useState('employee')
   const [tenantId, setTenantId] = useState('default')
   const [message, setMessage] = useState('')
   const [busy, setBusy] = useState(false)
@@ -20,27 +19,38 @@ export function UsersPage() {
     dispatch(setUsers(await api<ApiUser[]>('/api/admin/users')))
   }, [dispatch])
 
+  const loadTenants = useCallback(async () => {
+    try {
+      dispatch(setTenants(await api<ApiTenant[]>('/api/admin/tenants')))
+    } catch {
+      // 忽略
+    }
+  }, [dispatch])
+
   useEffect(() => {
     const timer = window.setTimeout(() => {
       loadUsers()
+      loadTenants()
+      if (currentUser?.tenant_id) {
+        setTenantId(currentUser.tenant_id)
+      }
     }, 0)
     return () => window.clearTimeout(timer)
-  }, [loadUsers])
+  }, [loadUsers, loadTenants, currentUser])
 
   async function createUser(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     setBusy(true)
     setMessage('正在创建用户...')
     try {
+      const body: Record<string, string> = { username, password, tenant_id: tenantId }
       await api('/api/admin/users', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, password, role, tenant_id: tenantId }),
+        body: JSON.stringify(body),
       })
       setUsername('')
       setPassword('')
-      setRole('employee')
-      setTenantId('default')
       setMessage('用户已创建')
       await loadUsers()
     } catch (err) {
@@ -50,14 +60,14 @@ export function UsersPage() {
     }
   }
 
-  async function updateUser(userId: number, next: Partial<Pick<ApiUser, 'role' | 'enabled'>>) {
+  async function toggleUser(userId: number, enabled: boolean) {
     setBusy(true)
     setMessage('正在更新用户...')
     try {
       await api(`/api/admin/users/${userId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(next),
+        body: JSON.stringify({ enabled }),
       })
       setMessage('用户已更新')
       await loadUsers()
@@ -94,16 +104,16 @@ export function UsersPage() {
             onChange={(event) => setPassword(event.target.value)}
             required
           />
-          <select value={role} onChange={(event) => setRole(event.target.value)}>
-            {roles.map((item) => (
-              <option value={item} key={item}>{item}</option>
-            ))}
+          <select value={tenantId} onChange={(event) => setTenantId(event.target.value)}>
+            {tenants.length > 0
+              ? tenants.map((t) => (
+                  <option value={t.id} key={t.id}>{t.name} ({t.id})</option>
+                ))
+              : <option value={currentUser?.tenant_id || 'default'}>
+                  {currentUser?.tenant_id || 'default'}
+                </option>
+            }
           </select>
-          <input
-            value={tenantId}
-            placeholder="租户 ID"
-            onChange={(event) => setTenantId(event.target.value)}
-          />
           <button type="submit" disabled={busy}>创建</button>
         </form>
         {message && <div className="status">{message}</div>}
@@ -118,7 +128,6 @@ export function UsersPage() {
           <div className="table-row user-row table-head">
             <span>ID</span>
             <span>用户名</span>
-            <span>角色</span>
             <span>租户</span>
             <span>状态</span>
             <span>创建时间</span>
@@ -127,22 +136,11 @@ export function UsersPage() {
             <div className="table-row user-row" key={user.id}>
               <span className="mono">{user.id}</span>
               <span>{user.username}</span>
-              <span>
-                <select
-                  value={user.role}
-                  onChange={(event) => updateUser(user.id, { role: event.target.value })}
-                  disabled={busy}
-                >
-                  {roles.map((item) => (
-                    <option value={item} key={item}>{item}</option>
-                  ))}
-                </select>
-              </span>
               <span className="mono">{user.tenant_id}</span>
               <span>
                 <button
                   className={user.enabled === false ? 'secondary' : 'danger'}
-                  onClick={() => updateUser(user.id, { enabled: !(user.enabled ?? true) })}
+                  onClick={() => toggleUser(user.id, user.enabled === false)}
                   disabled={busy}
                 >
                   {user.enabled === false ? '启用' : '禁用'}
@@ -151,7 +149,10 @@ export function UsersPage() {
               <span>{user.created_at || '-'}</span>
             </div>
           ))}
-          {!items.length && <div className="empty">暂无用户</div>}
+          {!items.length && <div className="empty">
+            <p>暂无用户</p>
+            <p style={{ fontSize: 13, marginTop: 4 }}>使用上方的表单创建第一个用户</p>
+          </div>}
         </div>
       </section>
     </AdminLayout>

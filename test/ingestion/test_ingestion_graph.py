@@ -23,12 +23,9 @@ def test_check_duplicates_uses_doc_meta_key_and_clears_previous_document_state()
             "documents": [{"content": "abc", "metadata": {}}],
             "current_index": 0,
             "chunks": [{"content": "previous"}],
-            "entities": [{"name": "previous"}],
-            "relationships": [{"source": "previous"}],
         }
     )
 
+    assert result["doc_id"]
     assert result["is_duplicate"] is True
     assert result["chunks"] == []
-    assert result["entities"] == []
-    assert result["relationships"] == []

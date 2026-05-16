@@ -106,6 +106,7 @@ def test_tool_registry_execute_tool_exception():
 
 
 def test_tool_registry_init_defaults():
+    ToolRegistry._initialized = False
     ToolRegistry.init_defaults()
-    for name in ("docker_sandbox", "file", "search", "bash"):
+    for name in ("file", "search", "database", "report"):
         assert ToolRegistry.get(name) is not None

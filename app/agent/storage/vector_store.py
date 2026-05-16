@@ -155,8 +155,13 @@ class FAISSStore:
     def _rebuild_from_meta(self, items: dict[str, dict]):
         """基于元数据重建 FAISS 索引。
 
-        FAISS IndexFlatIP 不支持单条删除，因此删除操作只能重建索引。
-        重建时优先使用缓存的 embedding，缺失时从旧索引 reconstruct 恢复。
+        FAISS IndexFlatIP 不支持单条删除（没有 remove_ids 方法），
+        因此删除操作只能重建索引。重建时优先使用缓存的 embedding，
+        缺失时从旧索引 reconstruct 恢复——这确保了即使元数据 JSON 被
+        手动修改后，删了 embedding 字段也不会导致重建失败。
+
+        注意：大规模删除时（数万条），重建开销显著。若成批量删除成为瓶颈，
+        应改用 IndexIDMap + IDSelector 的组合，避免全量重建。
         """
         import faiss
 

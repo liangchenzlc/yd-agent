@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from functools import lru_cache
 from pydantic import ConfigDict
 from pydantic_settings import BaseSettings
@@ -20,6 +22,10 @@ class Settings(BaseSettings):
     embedding_base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
     embedding_batch_size: int = 10
 
+    # Rerank（使用 DashScope 专用端点，base_url 与 LLM/Embedding 不同）
+    rerank_model: str = "qwen3-vl-rerank"
+    rerank_base_url: str = "https://dashscope.aliyuncs.com"
+
     # 存储
     storage_dir: str = "./data/storage"
 
@@ -28,10 +34,6 @@ class Settings(BaseSettings):
     core_memory_limit: int = 500
     memory_extraction_enabled: bool = True
     memory_importance_threshold: float = 0.3
-
-    # Docker 沙箱
-    sandbox_image: str = "python:3.12-slim"
-    code_timeout: int = 30
 
     # Eval
     eval_enabled: bool = True
@@ -45,6 +47,17 @@ class Settings(BaseSettings):
     redis_port: int = 6379
     redis_db: int = 0
     redis_password: str = ""
+
+    # Database (for data_analyst worker)
+    db_type: str = "mysql"
+    db_host: str = "localhost"
+    db_port: int | None = None
+    db_user: str = ""
+    db_password: str = ""
+    db_database: str = ""
+
+    # Chart output (for data_analyst worker)
+    charts_output_dir: str = "./data/charts"
 
     # Web
     web_secret_key: str = "change-me-in-production"

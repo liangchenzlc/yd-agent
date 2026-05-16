@@ -19,7 +19,7 @@ router = APIRouter(prefix="/api", tags=["user"])
 
 @router.post("/auth/login", response_model=AuthResponse)
 def login(payload: AuthRequest, response: Response) -> dict:
-    user = db.get_user_by_username(payload.username)
+    user = db.get_user_by_username(payload.username, tenant_id=payload.tenant_id)
     if not user or not verify_password(payload.password, user["password_hash"]):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="用户名或密码错误")
     if not user.get("enabled", 1):
@@ -89,16 +89,25 @@ async def _stream_agent(user: dict, message: str, session_id: str) -> str:
     )
 
     async with AgentRuntime(tenant_id=user.get("tenant_id", "default")) as runtime:
+        final_answer = ""
+        worker_assignments: list[str] = []
+        worker_results_list: list[dict] = []
+        dispatch_reasoning = ""
+
         async for chunk in runtime.graph.astream(state, stream_mode="updates"):
             for node_name, node_output in chunk.items():
                 if node_name == "supervisor":
+                    dispatch_reasoning = node_output.get("dispatch_reasoning", "")
+                    worker_assignments = node_output.get("worker_assignments", [])
                     event = {
                         "type": "supervisor",
-                        "reasoning": node_output.get("dispatch_reasoning", ""),
-                        "workers": node_output.get("worker_assignments", []),
+                        "reasoning": dispatch_reasoning,
+                        "workers": worker_assignments,
                     }
                 elif node_name == "summary_worker":
-                    event = {"type": "summary", "content": node_output.get("final_answer", "")}
+                    final_answer = node_output.get("final_answer", "")
+                    worker_results_list = node_output.get("worker_results", [])
+                    event = {"type": "summary", "content": final_answer}
                 elif node_name == "refiner":
                     needed = node_output.get("refinement_needed", False)
                     event = {"type": "refiner", "passed": not needed, "feedback": node_output.get("refinement_feedback", "")}
@@ -109,7 +118,26 @@ async def _stream_agent(user: dict, message: str, session_id: str) -> str:
 
                 yield f"event: {event['type']}\ndata: {json.dumps(event, ensure_ascii=False)}\n\n"
 
-    yield f"event: done\ndata: {json.dumps({'type': 'done', 'session_id': session_id})}\n\n"
+    # 流式结束后持久化会话并创建 qa_log
+    from app.web.db import db
+
+    tenant_id = user.get("tenant_id", "default")
+    db.ensure_session(user["id"], session_id, message[:40], tenant_id=tenant_id)
+    db.add_message(session_id, user["id"], "user", message, tenant_id=tenant_id)
+    qa_log = db.add_qa_log(
+        session_id=session_id,
+        user_id=user["id"],
+        question=message,
+        answer=final_answer,
+        workers=worker_assignments,
+        dispatch_reasoning=dispatch_reasoning,
+        worker_results=worker_results_list,
+        confidence=None,
+        tenant_id=tenant_id,
+    )
+    db.add_message(session_id, user["id"], "assistant", final_answer, tenant_id=tenant_id, qa_log_id=qa_log["id"])
+
+    yield f"event: done\ndata: {json.dumps({'type': 'done', 'session_id': session_id, 'qa_log_id': qa_log['id']})}\n\n"
 
 
 @router.get("/sessions")
@@ -124,11 +152,18 @@ def session_messages(session_id: str, user: dict = Depends(get_current_user)) ->
     return db.list_messages(session_id, user["id"], limit=100)
 
 
+@router.delete("/sessions/{session_id}")
+def delete_session(session_id: str, user: dict = Depends(get_current_user)) -> dict:
+    if not db.delete_session(user["id"], session_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="会话不存在")
+    return {"deleted": session_id}
+
+
 @router.get("/documents")
 async def documents(user: dict = Depends(get_current_user)) -> list[dict]:
     async with AgentRuntime(tenant_id=user.get("tenant_id", "default")) as runtime:
         docs = list_documents(runtime.storage_manager)
-    records = {item["id"]: item for item in db.list_document_records()}
+    records = {item["id"]: item for item in db.list_document_records(tenant_id=user.get("tenant_id"))}
     for doc in docs:
         doc.update({k: v for k, v in records.get(doc["id"], {}).items() if k not in {"id"}})
     return docs
@@ -136,7 +171,7 @@ async def documents(user: dict = Depends(get_current_user)) -> list[dict]:
 
 @router.post("/feedback")
 def feedback(payload: FeedbackRequest, user: dict = Depends(get_current_user)) -> dict:
-    return db.add_feedback(payload.qa_log_id, user["id"], payload.rating, payload.comment)
+    return db.add_feedback(payload.qa_log_id, user["id"], payload.rating, payload.comment, tenant_id=user.get("tenant_id", "default"))
 
 
 def _public_user(user: dict) -> dict:

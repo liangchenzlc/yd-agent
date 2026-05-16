@@ -57,7 +57,7 @@ async def run_chat_turn(user: dict, message: str, session_id: str | None = None)
     resolved_session_id = session_id or uuid4().hex[:12]
     title = message[:40] or "新会话"
     tenant_id = user.get("tenant_id", "default")
-    db.ensure_session(user["id"], resolved_session_id, title)
+    db.ensure_session(user["id"], resolved_session_id, title, tenant_id=tenant_id)
 
     # 优先从 Redis 缓存加载历史，未命中则从 SQLite 加载
     history = await _get_cached_history(resolved_session_id, user["id"])
@@ -82,9 +82,8 @@ async def run_chat_turn(user: dict, message: str, session_id: str | None = None)
     output_tokens = estimate_tokens(answer)
     await track_llm_tokens(user["id"], "chat", input_tokens, output_tokens)
 
-    # 持久化到 SQLite
-    db.add_message(resolved_session_id, user["id"], "user", message)
-    db.add_message(resolved_session_id, user["id"], "assistant", answer)
+    # 持久化到 SQLite（先创建 qa_log 拿到 id，再保存 assistant 消息）
+    db.add_message(resolved_session_id, user["id"], "user", message, tenant_id=tenant_id)
     qa_log = db.add_qa_log(
         session_id=resolved_session_id,
         user_id=user["id"],
@@ -94,7 +93,9 @@ async def run_chat_turn(user: dict, message: str, session_id: str | None = None)
         dispatch_reasoning=dispatch_reasoning,
         worker_results=worker_results,
         confidence=_infer_confidence(worker_results),
+        tenant_id=tenant_id,
     )
+    db.add_message(resolved_session_id, user["id"], "assistant", answer, tenant_id=tenant_id, qa_log_id=qa_log["id"])
 
     # 刷新 Redis 缓存
     updated_history = db.list_messages(resolved_session_id, user["id"], limit=20)

@@ -6,11 +6,11 @@ from test.helpers import make_initial_state
 def test_route_to_workers_prefers_refinement_targets():
     state = make_initial_state("fix it")
     state["worker_assignments"] = ["retrieval"]
-    state["refinement_targets"] = ["code"]
+    state["refinement_targets"] = ["docs"]
 
     sends = route_to_workers(state)
 
-    assert [send.node for send in sends] == ["code_worker"]
+    assert [send.node for send in sends] == ["docs_worker"]
 
 
 def test_summary_uses_only_current_refinement_results(monkeypatch):

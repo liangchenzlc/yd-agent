@@ -8,6 +8,16 @@ type DailyStats = {
   tokens: { total: number; input: number; output: number }
 }
 
+function SkeletonCard() {
+  return (
+    <div className="stat-card" style={{ opacity: 0.5 }}>
+      <h3>&nbsp;</h3>
+      <div className="stat-value" style={{ background: '#e2e8f0', borderRadius: 4, height: 40, width: '60%', margin: '8px auto' }} />
+      <div className="stat-label">&nbsp;</div>
+    </div>
+  )
+}
+
 export function UsagePage() {
   const [stats, setStats] = useState<DailyStats | null>(null)
   const [busy, setBusy] = useState(false)
@@ -16,16 +26,11 @@ export function UsagePage() {
     setBusy(true)
     try {
       setStats(await api<DailyStats>('/api/admin/usage'))
-    } catch {
-      // silently fail
-    } finally {
-      setBusy(false)
-    }
+    } catch { /* silently fail */ }
+    finally { setBusy(false) }
   }, [])
 
-  useEffect(() => {
-    loadStats()
-  }, [loadStats])
+  useEffect(() => { loadStats() }, [loadStats])
 
   return (
     <AdminLayout>
@@ -37,9 +42,9 @@ export function UsagePage() {
         <button onClick={loadStats} disabled={busy}>刷新</button>
       </header>
 
-      {stats && (
-        <>
-          <section className="stats-cards">
+      <section className="stats-cards">
+        {stats ? (
+          <>
             <div className="stat-card">
               <h3>API 调用</h3>
               <div className="stat-value">{stats.api_calls.toLocaleString()}</div>
@@ -60,9 +65,16 @@ export function UsagePage() {
               <div className="stat-value">{stats.tokens.output.toLocaleString()}</div>
               <div className="stat-label">估算值</div>
             </div>
-          </section>
-        </>
-      )}
+          </>
+        ) : (
+          <>
+            <SkeletonCard />
+            <SkeletonCard />
+            <SkeletonCard />
+            <SkeletonCard />
+          </>
+        )}
+      </section>
     </AdminLayout>
   )
 }

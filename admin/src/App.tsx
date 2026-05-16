@@ -4,6 +4,7 @@ import { HardCasesPage } from './pages/HardCasesPage'
 import { KnowledgeGapsPage } from './pages/KnowledgeGapsPage'
 import { LoginPage } from './pages/LoginPage'
 import { QaLogsPage } from './pages/QaLogsPage'
+import { TenantsPage } from './pages/TenantsPage'
 import { UsagePage } from './pages/UsagePage'
 import { UsersPage } from './pages/UsersPage'
 
@@ -45,6 +46,14 @@ export default function App() {
         element={
           <RequireAdmin>
             <KnowledgeGapsPage />
+          </RequireAdmin>
+        }
+      />
+      <Route
+        path="/tenants"
+        element={
+          <RequireAdmin>
+            <TenantsPage />
           </RequireAdmin>
         }
       />

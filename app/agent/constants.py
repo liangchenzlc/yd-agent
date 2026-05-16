@@ -4,34 +4,26 @@ MAX_REFINEMENTS = 2
 # Refiner 评分阈值（0-10），低于此值触发重试
 REFINER_SCORE_THRESHOLD = 7
 
-# Docker 沙箱镜像
-DOCKER_SANDBOX_IMAGE = "python:3.12-slim"
-
-# 代码执行超时（秒）
-CODE_TIMEOUT = 30
-
-# GraphRAG
-GRAPH_FIELD_SEP = "<SEP>"
-DEFAULT_ENTITY_TYPES = ["person", "organization", "product", "concept", "location", "event", "technology"]
-DEFAULT_MAX_GLEANING = 1
-
 # 文档分块
 CHUNK_SIZE = 1200
-CHUNK_OVERLAP = 100
+CHUNK_OVERLAP = 200
+
+# 检索上下文（用于 LLM 的 context 最大 token 预算）
+MAX_CONTEXT_TOKENS = 3000
 
 # 检索
 CHUNK_TOP_K = 20
-ENTITY_TOP_K = 10
-RELATIONSHIP_TOP_K = 10
 COSINE_THRESHOLD = 0.6
+BM25_TOP_K = 20
+RRF_CONSTANT_K = 60
 
 # Worker 名称常量
 WORKER_RETRIEVAL = "retrieval"
-WORKER_CODE = "code"
 WORKER_DOCS = "docs"
 WORKER_SUMMARY = "summary"
+WORKER_DATA_ANALYST = "data_analyst"
 
-ALL_WORKERS = [WORKER_RETRIEVAL, WORKER_CODE, WORKER_DOCS, WORKER_SUMMARY]
+ALL_WORKERS = [WORKER_RETRIEVAL, WORKER_DOCS, WORKER_DATA_ANALYST, WORKER_SUMMARY]
 
 # 记忆
 MEMORY_EXTRACTION_TYPES = ["fact", "preference", "pattern", "template"]

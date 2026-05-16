@@ -40,8 +40,9 @@ def refiner_node(state: AgentState) -> dict:
         structured_llm = llm.with_structured_output(RefinerOutput)
         result: RefinerOutput = structured_llm.invoke(prompt)
     except Exception:
-        logger.warning("Refiner LLM call failed, defaulting to pass (score=7)", exc_info=True)
-        result = RefinerOutput(score=7)  # 解析失败时默认通过
+        # LLM 解析失败时给低分触发 refiner 重试，而非静默通过
+        logger.warning("Refiner LLM call failed, defaulting to score=2 (trigger retry)", exc_info=True)
+        result = RefinerOutput(score=2)
 
     retarget = [w for w in result.retarget_workers if w in ALL_WORKERS]
 

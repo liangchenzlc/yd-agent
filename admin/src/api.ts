@@ -53,6 +53,14 @@ export type KnowledgeGapRecord = {
   }>
 }
 
+export type ApiTenant = {
+  id: string
+  name: string
+  config: Record<string, unknown>
+  created_at: string
+  updated_at: string
+}
+
 export async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
   const token = localStorage.getItem('yd_admin_token') || ''
   const response = await fetch(path, {

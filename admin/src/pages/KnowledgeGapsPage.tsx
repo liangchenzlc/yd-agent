@@ -92,7 +92,12 @@ export function KnowledgeGapsPage() {
             )}
           </article>
         ))}
-        {!filteredItems.length && <div className="empty panel">暂无知识缺口</div>}
+        {!filteredItems.length && (
+          <div className="empty">
+            <p>暂无知识缺口</p>
+            <p style={{ fontSize: 13, marginTop: 4 }}>系统运行后会自动统计高频但未找到答案的问题</p>
+          </div>
+        )}
       </section>
     </AdminLayout>
   )

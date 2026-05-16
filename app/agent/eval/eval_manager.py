@@ -4,32 +4,33 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 from app.agent.constants import EVAL_MAX_RECENT_RUNS, EVAL_SCORE_BUCKETS
-from app.agent.storage.kv_store import JsonKVStore
+from app.agent.storage.redis_kv_store import RedisKVStore
 
 
 class EvalManager:
-    """评估管理器：统筹评估记录的存储、检索、统计和维护。"""
+    """评估管理器：统筹评估记录的存储、检索、统计和维护。
 
-    def __init__(self, storage_dir: str):
-        self.eval_runs_kv = JsonKVStore("eval_runs", storage_dir)
-        self.hard_cases_kv = JsonKVStore("hard_cases", storage_dir)
-        self.feedback_kv = JsonKVStore("feedback", storage_dir)
-        self.eval_stats_kv = JsonKVStore("eval_stats", storage_dir)
+    使用 RedisKVStore 替代原有的文件存储，所有操作通过公共 API 完成，
+    不依赖内部 _data 字典。
+    """
+
+    def __init__(self, tenant_id: str = "default"):
+        prefix = tenant_id if tenant_id else "default"
+        self.eval_runs_kv = RedisKVStore(f"eval_runs:{prefix}")
+        self.hard_cases_kv = RedisKVStore(f"hard_cases:{prefix}")
+        self.feedback_kv = RedisKVStore(f"feedback:{prefix}")
+        self.eval_stats_kv = RedisKVStore(f"eval_stats:{prefix}")
 
     def initialize(self):
         self.eval_runs_kv.initialize()
         self.hard_cases_kv.initialize()
         self.feedback_kv.initialize()
         self.eval_stats_kv.initialize()
-        # 确保 stats 有默认值
         if self.eval_stats_kv.get_by_id("global") is None:
             self._reset_stats()
 
     def finalize(self):
-        self.eval_runs_kv.persist()
-        self.hard_cases_kv.persist()
-        self.feedback_kv.persist()
-        self.eval_stats_kv.persist()
+        pass
 
     # ---- Eval Run 操作 ----
 
@@ -41,8 +42,9 @@ class EvalManager:
         return run_id
 
     async def get_eval_run(self, run_id: str) -> dict | None:
-        for key, val in self.eval_runs_kv._data.items():
-            if val.get("run_id") == run_id:
+        for key in self.eval_runs_kv.keys():
+            val = self.eval_runs_kv.get_by_id(key)
+            if val and val.get("run_id") == run_id:
                 return val
         return None
 
@@ -50,27 +52,28 @@ class EvalManager:
         self, limit: int = 50, offset: int = 0,
         min_score: int = 0, max_score: int = 10,
     ) -> list[dict]:
-        runs = [
-            v for v in self.eval_runs_kv._data.values()
-            if min_score <= v.get("overall_score", 0) <= max_score
-        ]
+        runs = []
+        for _, val in self.eval_runs_kv.get_all():
+            if min_score <= val.get("overall_score", 0) <= max_score:
+                runs.append(val)
         runs.sort(key=lambda r: r.get("timestamp", ""), reverse=True)
         return runs[offset:offset + limit]
 
     async def count_eval_runs(self, min_score: int = 0, max_score: int = 10) -> int:
-        return sum(
-            1 for v in self.eval_runs_kv._data.values()
-            if min_score <= v.get("overall_score", 0) <= max_score
-        )
+        count = 0
+        for _, val in self.eval_runs_kv.get_all():
+            if min_score <= val.get("overall_score", 0) <= max_score:
+                count += 1
+        return count
 
     async def delete_eval_runs(self) -> int:
-        count = len(self.eval_runs_kv._data)
-        self.eval_runs_kv._data.clear()
+        count = len(self.eval_runs_kv)
+        self.eval_runs_kv.clear()
         self._reset_stats()
         return count
 
     async def get_recent_runs(self, n: int = 20) -> list[dict]:
-        runs = list(self.eval_runs_kv._data.values())
+        runs = [val for _, val in self.eval_runs_kv.get_all()]
         runs.sort(key=lambda r: r.get("timestamp", ""), reverse=True)
         return runs[:n]
 
@@ -84,7 +87,7 @@ class EvalManager:
         return case_id
 
     async def get_hard_case(self, case_id: str) -> dict | None:
-        for key, val in self.hard_cases_kv._data.items():
+        for _, val in self.hard_cases_kv.get_all():
             if val.get("case_id") == case_id:
                 return val
         return None
@@ -93,28 +96,30 @@ class EvalManager:
         self, reviewed: bool | None = None,
         limit: int = 50, offset: int = 0,
     ) -> list[dict]:
-        cases = list(self.hard_cases_kv._data.values())
+        cases = [val for _, val in self.hard_cases_kv.get_all()]
         if reviewed is not None:
             cases = [c for c in cases if c.get("reviewed", False) == reviewed]
         cases.sort(key=lambda c: c.get("timestamp", ""), reverse=True)
         return cases[offset:offset + limit]
 
     async def mark_case_reviewed(self, case_id: str) -> bool:
-        for key, val in self.hard_cases_kv._data.items():
-            if val.get("case_id") == case_id:
+        for key in self.hard_cases_kv.keys():
+            val = self.hard_cases_kv.get_by_id(key)
+            if val and val.get("case_id") == case_id:
                 val["reviewed"] = True
+                self.hard_cases_kv.upsert({key: val})
                 return True
         return False
 
     async def count_hard_cases(self, reviewed: bool | None = None) -> int:
-        cases = self.hard_cases_kv._data.values()
+        cases = [val for _, val in self.hard_cases_kv.get_all()]
         if reviewed is not None:
             cases = [c for c in cases if c.get("reviewed", False) == reviewed]
-        return len(list(cases))
+        return len(cases)
 
     async def delete_hard_cases(self) -> int:
-        count = len(self.hard_cases_kv._data)
-        self.hard_cases_kv._data.clear()
+        count = len(self.hard_cases_kv)
+        self.hard_cases_kv.clear()
         return count
 
     # ---- Feedback 操作 ----
@@ -130,20 +135,20 @@ class EvalManager:
         self, user_id: str | None = None,
         limit: int = 50, offset: int = 0,
     ) -> list[dict]:
-        items = list(self.feedback_kv._data.values())
+        items = [val for _, val in self.feedback_kv.get_all()]
         if user_id:
             items = [f for f in items if f.get("user_id") == user_id]
         items.sort(key=lambda f: f.get("timestamp", ""), reverse=True)
         return items[offset:offset + limit]
 
     async def count_feedback(self, user_id: str | None = None) -> int:
-        items = self.feedback_kv._data.values()
+        items = [val for _, val in self.feedback_kv.get_all()]
         if user_id:
             items = [f for f in items if f.get("user_id") == user_id]
-        return len(list(items))
+        return len(items)
 
     async def get_feedback_stats(self) -> dict:
-        items = list(self.feedback_kv._data.values())
+        items = [val for _, val in self.feedback_kv.get_all()]
         up = sum(1 for f in items if f.get("thumbs_up"))
         down = len(items) - up
         return {
@@ -170,7 +175,6 @@ class EvalManager:
         stats["total_score"] = stats.get("total_score", 0) + score
         stats["avg_score"] = round(stats["total_score"] / stats["total_eval_runs"], 2)
 
-        # 分桶
         for bucket in EVAL_SCORE_BUCKETS:
             low, high = bucket.split("-")
             if int(low) <= score <= int(high):
@@ -178,7 +182,6 @@ class EvalManager:
                 dist[bucket] = dist.get(bucket, 0) + 1
                 break
 
-        # 通过率 (score >= 6 为通过)
         passed = stats.get("total_passed", 0) + (1 if score >= 6 else 0)
         stats["total_passed"] = passed
         stats["pass_rate"] = round(passed / stats["total_eval_runs"], 2)
@@ -190,7 +193,7 @@ class EvalManager:
     async def purge_expired_runs(self, retention_days: int) -> int:
         cutoff = datetime.now(timezone.utc) - timedelta(days=retention_days)
         expired_keys = []
-        for key, val in self.eval_runs_kv._data.items():
+        for key, val in self.eval_runs_kv.get_all():
             ts_str = val.get("timestamp", "")
             if ts_str:
                 try:
@@ -199,22 +202,18 @@ class EvalManager:
                         expired_keys.append(key)
                 except (ValueError, TypeError):
                     pass
-        for key in expired_keys:
-            del self.eval_runs_kv._data[key]
         if expired_keys:
-            self.eval_runs_kv.persist()
+            self.eval_runs_kv.mdelete(expired_keys)
         return len(expired_keys)
 
     async def cap_max_runs(self, max_runs: int = EVAL_MAX_RECENT_RUNS) -> int:
-        if len(self.eval_runs_kv._data) <= max_runs:
+        if len(self.eval_runs_kv) <= max_runs:
             return 0
-        runs = list(self.eval_runs_kv._data.items())
-        runs.sort(key=lambda kv: kv[1].get("timestamp", ""))
-        to_remove = runs[:len(runs) - max_runs]
-        for key, _ in to_remove:
-            del self.eval_runs_kv._data[key]
+        items = self.eval_runs_kv.get_all()
+        items.sort(key=lambda kv: kv[1].get("timestamp", ""))
+        to_remove = [k for k, _ in items[:len(items) - max_runs]]
         if to_remove:
-            self.eval_runs_kv.persist()
+            self.eval_runs_kv.mdelete(to_remove)
         return len(to_remove)
 
     @staticmethod

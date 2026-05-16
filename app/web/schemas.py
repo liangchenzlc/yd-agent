@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 class AuthRequest(BaseModel):
     username: str = Field(min_length=2, max_length=64)
     password: str = Field(min_length=1, max_length=128)
+    tenant_id: str | None = Field(default=None, max_length=64, description="登录时指定租户，不传则用户名跨租户唯一时可用")
 
 
 class AuthResponse(BaseModel):
@@ -36,10 +37,19 @@ class FeedbackRequest(BaseModel):
 class AdminUserCreateRequest(BaseModel):
     username: str = Field(min_length=2, max_length=64)
     password: str = Field(min_length=1, max_length=128)
-    role: str = Field(pattern="^(employee|admin|super_admin)$")
-    tenant_id: str = Field(default="default", max_length=64)
+    tenant_id: str | None = Field(default=None, max_length=64, description="不传则默认所属租户")
 
 
 class AdminUserUpdateRequest(BaseModel):
-    role: str | None = Field(default=None, pattern="^(employee|admin|super_admin)$")
     enabled: bool | None = None
+
+
+class TenantCreateRequest(BaseModel):
+    id: str = Field(min_length=2, max_length=64, pattern="^[a-z0-9_-]+$")
+    name: str = Field(min_length=1, max_length=128)
+    config: dict | None = None
+
+
+class TenantUpdateRequest(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=128)
+    config: dict | None = None

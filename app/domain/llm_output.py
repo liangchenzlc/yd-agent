@@ -77,19 +77,3 @@ class KeywordOutput(BaseModel):
         return v
 
 
-class EntityItem(BaseModel):
-    name: str = ""
-    type: str = ""
-    description: str = ""
-
-
-class RelationItem(BaseModel):
-    source: str = ""
-    target: str = ""
-    type: str = ""
-    description: str = ""
-
-
-class EntityExtractionOutput(BaseModel):
-    entities: list[EntityItem] = []
-    relationships: list[RelationItem] = []

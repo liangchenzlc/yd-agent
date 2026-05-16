@@ -13,11 +13,52 @@ import {
   setUser,
 } from '../store'
 
-type ChatResponse = {
-  answer: string
-  session_id: string
-  qa_log_id: number
-  workers_used: string[]
+function ThumbUpIcon({ filled }: { filled?: boolean }) {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill={filled ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M7 10v12" /><path d="M15 5.88 14 10h5.83a2 2 0 0 1 1.92 2.56l-2.33 8A2 2 0 0 1 17.5 22H4a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2h2.76a2 2 0 0 0 1.79-1.11L12 2h0a3.13 3.13 0 0 1 3 3.88Z" />
+    </svg>
+  )
+}
+
+function ThumbDownIcon({ filled }: { filled?: boolean }) {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill={filled ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M17 14V2" /><path d="M9 18.12 10 14H4.17a2 2 0 0 1-1.92-2.56l2.33-8A2 2 0 0 1 6.5 2H20a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-2.76a2 2 0 0 0-1.79 1.11L12 22h0a3.13 3.13 0 0 1-3-3.88Z" />
+    </svg>
+  )
+}
+
+const EXAMPLE_PROMPTS = [
+  '公司的请假制度是怎样的？',
+  '帮我写一份项目总结文档',
+  '用 Python 计算本季度销售额',
+  '介绍一下公司的人事政策',
+]
+
+function EmptyState({ onPromptClick }: { onPromptClick: (text: string) => void }) {
+  return (
+    <div className="empty-state">
+      <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <circle cx="12" cy="12" r="10" />
+        <path d="M12 16v-4" /><path d="M12 8h.01" />
+      </svg>
+      <h3>企业知识问答系统</h3>
+      <p>可以询问企业制度、流程规范、IT 支持或 HR 相关问题</p>
+      <div className="example-prompts">
+        {EXAMPLE_PROMPTS.map((prompt) => (
+          <button
+            key={prompt}
+            className="prompt-chip"
+            onClick={() => onPromptClick(prompt)}
+            type="button"
+          >
+            {prompt}
+          </button>
+        ))}
+      </div>
+    </div>
+  )
 }
 
 export function ChatPage() {
@@ -29,7 +70,25 @@ export function ChatPage() {
   const [streaming, setStreaming] = useState(false)
   const [streamContent, setStreamContent] = useState('')
   const [thinkingStatus, setThinkingStatus] = useState('')
+  const [showScrollBtn, setShowScrollBtn] = useState(false)
   const abortRef = useRef<(() => void) | null>(null)
+  const chatListRef = useRef<HTMLElement>(null)
+
+  const scrollToBottom = useCallback(() => {
+    requestAnimationFrame(() => {
+      if (chatListRef.current) {
+        chatListRef.current.scrollTop = chatListRef.current.scrollHeight
+      }
+    })
+  }, [])
+
+  useEffect(() => { scrollToBottom() }, [messages, streamContent, scrollToBottom])
+
+  const onChatScroll = useCallback(() => {
+    if (!chatListRef.current) return
+    const { scrollTop, scrollHeight, clientHeight } = chatListRef.current
+    setShowScrollBtn(scrollHeight - scrollTop - clientHeight > 200)
+  }, [])
 
   const logout = useCallback(() => {
     dispatch(clearAuth())
@@ -47,10 +106,20 @@ export function ChatPage() {
   const refreshSessions = useCallback(async () => {
     try {
       dispatch(setSessions(await api<ChatSession[]>('/api/sessions')))
-    } catch {
-      // Auth is checked by loadMe; avoid noisy session refresh errors.
-    }
+    } catch { /* Auth checked by loadMe */ }
   }, [dispatch])
+
+  async function deleteSession(id: string) {
+    if (!window.confirm('确定删除此会话？')) return
+    try {
+      await api(`/api/sessions/${id}`, { method: 'DELETE' })
+      if (id === sessionId) {
+        dispatch(setSessionId(''))
+        dispatch(setMessages([]))
+      }
+      await refreshSessions()
+    } catch { /* ignore */ }
+  }
 
   useEffect(() => {
     loadMe()
@@ -109,12 +178,12 @@ export function ChatPage() {
         setThinkingStatus('')
         dispatch(addMessage({ role: 'assistant', content: error }))
       },
-      (doneSessionId) => {
+      (doneSessionId, qaLogId) => {
         setStreaming(false)
         setThinkingStatus('')
         dispatch(setSessionId(doneSessionId))
         if (accumulatedAnswer) {
-          dispatch(addMessage({ role: 'assistant', content: accumulatedAnswer }))
+          dispatch(addMessage({ role: 'assistant', content: accumulatedAnswer, qaLogId }))
         }
         setStreamContent('')
         refreshSessions()
@@ -138,8 +207,15 @@ export function ChatPage() {
       })
       dispatch(setMessageFeedback({ qaLogId, rating }))
     } catch (err) {
-      dispatch(addMessage({ role: 'assistant', content: err instanceof Error ? err.message : '反馈提交失败' }))
+      // Silently handle feedback errors
     }
+  }
+
+  function handlePromptClick(prompt: string) {
+    setText(prompt)
+    // Focus the textarea
+    const textarea = document.querySelector('.composer textarea') as HTMLTextAreaElement | null
+    textarea?.focus()
   }
 
   return (
@@ -148,34 +224,57 @@ export function ChatPage() {
         <h1>yd-Agent</h1>
         <div className="sub">企业知识问答</div>
         <span className="pill">{user ? `${user.username} · ${user.role}` : 'loading'}</span>
-        <button className="secondary" onClick={newSession}>新会话</button>
-        <button className="secondary" onClick={logout}>退出登录</button>
+        <button className="secondary" onClick={newSession}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ verticalAlign: 'middle', marginRight: 6 }}>
+            <path d="M5 12h14" /><path d="M12 5v14" />
+          </svg>
+          新会话
+        </button>
         <h2>历史会话</h2>
         <div className="session-list">
           {sessions.map((item) => (
-            <button className="secondary" key={item.id} onClick={() => loadSession(item.id)}>
-              {item.title}
-            </button>
+            <div className="session-item" key={item.id}>
+              <button className="secondary" onClick={() => loadSession(item.id)}>
+                <span className="session-title">{item.title}</span>
+                <span className="session-delete" onClick={(e) => { e.stopPropagation(); deleteSession(item.id) }}>
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                  </svg>
+                </span>
+              </button>
+            </div>
           ))}
+          {sessions.length === 0 && <span className="muted" style={{ fontSize: 13 }}>暂无历史会话</span>}
         </div>
+        <button className="secondary" onClick={logout} style={{ marginTop: 'auto' }}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ verticalAlign: 'middle', marginRight: 6 }}>
+            <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><polyline points="16 17 21 12 16 7" /><line x1="21" y1="12" x2="9" y2="12" />
+          </svg>
+          退出登录
+        </button>
       </aside>
       <main className="chat-main">
-        <section className="chat-list">
+        <section className="chat-list" ref={chatListRef} onScroll={onChatScroll}>
+          {messages.length === 0 && !streaming && <EmptyState onPromptClick={handlePromptClick} />}
           {messages.map((item, index) => (
-            <article className={`message ${item.role === 'user' ? 'user' : 'assistant'}`} key={index}>
-              <div>{item.content}</div>
+            <article className={`message ${item.role === 'user' ? 'user' : ''}`} key={item.id ?? index}>
+              <div className="stream-reveal">{item.content}</div>
               {item.role === 'assistant' && item.qaLogId && (
                 <div className="feedback-bar">
                   <button
                     className={item.feedbackRating === 1 ? 'feedback active' : 'feedback'}
                     onClick={() => sendFeedback(item.qaLogId!, 1)}
+                    aria-label="有帮助"
                   >
+                    <ThumbUpIcon filled={item.feedbackRating === 1} />
                     有帮助
                   </button>
                   <button
                     className={item.feedbackRating === -1 ? 'feedback active danger' : 'feedback'}
                     onClick={() => sendFeedback(item.qaLogId!, -1)}
+                    aria-label="不准确"
                   >
+                    <ThumbDownIcon filled={item.feedbackRating === -1} />
                     不准确
                   </button>
                   {item.feedbackRating && <span>已反馈</span>}
@@ -183,11 +282,28 @@ export function ChatPage() {
               )}
             </article>
           ))}
+          {showScrollBtn && (
+            <button
+              className="scroll-to-bottom"
+              onClick={scrollToBottom}
+              aria-label="滚动到最新消息"
+              type="button"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <polyline points="6 9 12 15 18 9" />
+              </svg>
+            </button>
+          )}
           {streaming && (
             <article className="message assistant">
-              {thinkingStatus && <div className="thinking-status">{thinkingStatus}</div>}
-              {streamContent && <div>{streamContent}</div>}
-              {!streamContent && <div className="cursor-blink">▊</div>}
+              {thinkingStatus && (
+                <div className="thinking-status">
+                  {thinkingStatus}
+                  <span className="thinking-dots"><span /><span /><span /></span>
+                </div>
+              )}
+              {streamContent && <div className="stream-reveal">{streamContent}</div>}
+              {!streamContent && !thinkingStatus && <div className="cursor-blink">▊</div>}
             </article>
           )}
         </section>
@@ -195,7 +311,7 @@ export function ChatPage() {
           <textarea
             rows={2}
             value={text}
-            placeholder="询问企业制度、流程、IT 或 HR 问题"
+            placeholder="询问企业制度、流程、IT 或 HR 问题..."
             onChange={(event) => setText(event.target.value)}
             onKeyDown={onComposerKeyDown}
             disabled={streaming}

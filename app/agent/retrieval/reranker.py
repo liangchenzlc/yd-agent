@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-import json
 import logging
-from typing import Any
-from urllib.request import Request, urlopen
+
+import requests
 
 from app.config.settings import get_settings
 
@@ -11,47 +10,62 @@ logger = logging.getLogger(__name__)
 
 
 def rerank(query: str, documents: list[dict], top_k: int = 5) -> list[dict]:
-    """用重排序模型对检索结果进行二阶段精排。
+    """用 qwen3-vl-rerank 模型对检索结果进行二阶段精排。
 
-    调用阿里百炼 rerank API，返回重排后的文档列表（按相关性降序）。
-    API 失败时降级返回原始顺序的前 top_k 条。
+    调用阿里百炼 rerank API，payload 格式：
+      { model, input: { query, documents }, parameters: { top_n, return_documents } }
+
+    API 失败时静默降级：返回原始顺序的前 top_k 条。
+    不抛异常的原因：搜索服务的可用性不应影响整体回答流程。
     """
     if not documents:
         return []
 
     texts = [_doc_text(doc) for doc in documents]
     settings = get_settings()
-    api_key = settings.embedding_api_key or settings.llm_api_key
-    base_url = settings.embedding_base_url or settings.llm_base_url
+    api_key = settings.llm_api_key
 
     if not api_key:
         return documents[:top_k]
 
     try:
-        url = f"{base_url.rstrip('/')}/api/v1/services/rerank/text-rerank"
-        payload = json.dumps({
-            "model": settings.embedding_model,  # reuse embedding model config
-            "query": query,
-            "documents": texts,
-            "top_n": min(top_k, len(texts)),
-        }, ensure_ascii=False).encode("utf-8")
+        url = f"{settings.rerank_base_url.rstrip('/')}/api/v1/services/rerank/text-rerank/text-rerank"
+        payload = {
+            "model": settings.rerank_model,
+            "input": {
+                "query": query,
+                "documents": texts,
+            },
+            "parameters": {
+                "top_n": min(top_k, len(texts)),
+                "return_documents": True,
+            },
+        }
 
-        req = Request(url, data=payload, method="POST")
-        req.add_header("Authorization", f"Bearer {api_key}")
-        req.add_header("Content-Type", "application/json")
+        resp = requests.post(
+            url,
+            json=payload,
+            headers={"Authorization": f"Bearer {api_key}"},
+            timeout=15,
+        )
+        resp.raise_for_status()
+        body = resp.json()
 
-        with urlopen(req, timeout=15) as resp:
-            body = json.loads(resp.read().decode("utf-8"))
-            results = body.get("results", []) if "results" in body else \
-                      body.get("data", {}).get("results", [])
+        # DashScope response: {"output": {"results": [...]}}
+        if "output" in body and "results" in body["output"]:
+            results = body["output"]["results"]
+        elif "results" in body:
+            results = body["results"]
+        else:
+            results = body.get("data", {}).get("results", [])
 
         ranked: list[dict] = []
         for item in results:
-            idx = item.get("index", item.get("doc_index", -1))
-            relevance = item.get("relevance_score", item.get("score", 0))
+            idx = item.get("index", -1)
+            score = item.get("relevance_score", item.get("score", 0))
             if 0 <= idx < len(documents):
                 doc = dict(documents[idx])
-                doc["rerank_score"] = round(relevance, 4)
+                doc["rerank_score"] = round(float(score), 4)
                 ranked.append(doc)
 
         ranked.sort(key=lambda d: d.get("rerank_score", 0), reverse=True)
@@ -63,5 +77,4 @@ def rerank(query: str, documents: list[dict], top_k: int = 5) -> list[dict]:
 
 
 def _doc_text(doc: dict) -> str:
-    """提取文档文本用于重排序。"""
     return doc.get("text") or doc.get("content", "")

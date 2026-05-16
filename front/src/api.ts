@@ -53,7 +53,7 @@ export function chatStreamSSE(
   sessionId: string,
   onEvent: (event: StreamEvent) => void,
   onError: (error: string) => void,
-  onDone: (sessionId: string) => void,
+  onDone: (sessionId: string, qaLogId?: number) => void,
 ): () => void {
   const params = new URLSearchParams({ message })
   if (sessionId) params.set('session_id', sessionId)
@@ -83,7 +83,7 @@ export function chatStreamSSE(
   eventSource.addEventListener('done', (e) => {
     try {
       const data = JSON.parse(e.data)
-      onDone(data.session_id || sessionId)
+      onDone(data.session_id || sessionId, data.qa_log_id)
     } catch { /* skip malformed */ }
     eventSource.close()
   })

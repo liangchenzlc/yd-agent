@@ -15,15 +15,17 @@ def docs_worker_node(state: AgentState) -> dict:
     feedback = state.get("refinement_feedback", "")
     refinement_context = f"## 上一轮反馈\n{feedback}\n请根据反馈改进文档。" if feedback else ""
 
+    # 绑定 FileTool 工具，LLM 自主决定调用 write_file / read_file / list_files
+    file_tool = ToolRegistry.get("file")
+    tools = file_tool.get_lc_tools()
+    tools_description = "\n".join(f"- {t.name}: {t.description}" for t in tools)
+
     prompt = fill_prompt(DOCS_WORKER_PROMPT,
+        tools_description=tools_description,
         refinement_context=refinement_context,
         user_message=user_message,
         conversation_context=format_conversation_context(messages),
     )
-
-    # 绑定 FileTool 工具，LLM 自主决定调用 write_file / read_file / list_files
-    file_tool = ToolRegistry.get("file")
-    tools = file_tool.get_lc_tools()
 
     content = react_loop(llm, prompt, tools)
 
