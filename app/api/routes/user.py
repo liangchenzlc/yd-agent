@@ -19,9 +19,12 @@ router = APIRouter(prefix="/api", tags=["user"])
 
 @router.post("/auth/login", response_model=AuthResponse)
 def login(payload: AuthRequest, response: Response) -> dict:
-    user = db.get_user_by_username(payload.username, tenant_id=payload.tenant_id)
+    """管理后台登录：super_admin 和 admin 均可登录。"""
+    user = db.get_user_by_username(payload.username)
     if not user or not verify_password(payload.password, user["password_hash"]):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="用户名或密码错误")
+    if user["role"] not in ("super_admin", "admin"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权访问管理后台")
     if not user.get("enabled", 1):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="账号已禁用")
     token = create_token(user)
@@ -33,6 +36,20 @@ def login(payload: AuthRequest, response: Response) -> dict:
         max_age=24 * 60 * 60,
     )
     return {"token": token, "user": _public_user(user)}
+
+
+@router.post("/user/login", response_model=AuthResponse)
+def user_login(payload: AuthRequest, response: Response) -> dict:
+    """用户前端登录：仅 user 角色可登录。"""
+    user = db.get_user_by_username(payload.username)
+    if not user or not verify_password(payload.password, user["password_hash"]):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="用户名或密码错误")
+    if user["role"] != "user":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="该账号无权登录用户端")
+    if not user.get("enabled", 1):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="账号已禁用")
+    token = create_token(user)
+    return {"token": token, "user": {"id": user["id"], "username": user["username"]}}
 
 
 @router.get("/me")
@@ -64,7 +81,6 @@ async def chat_stream(
 
 
 async def _stream_agent(user: dict, message: str, session_id: str) -> str:
-    """Agent 流式执行，逐个节点推送 SSE 事件。"""
     from langchain_core.messages import HumanMessage
 
     from app.agent.state import AgentState
@@ -88,7 +104,9 @@ async def _stream_agent(user: dict, message: str, session_id: str) -> str:
         session_history=[],
     )
 
-    async with AgentRuntime(tenant_id=user.get("tenant_id", "default")) as runtime:
+    tenant_id = user.get("tenant_id") or "default"
+
+    async with AgentRuntime(tenant_id=tenant_id) as runtime:
         final_answer = ""
         worker_assignments: list[str] = []
         worker_results_list: list[dict] = []
@@ -118,10 +136,8 @@ async def _stream_agent(user: dict, message: str, session_id: str) -> str:
 
                 yield f"event: {event['type']}\ndata: {json.dumps(event, ensure_ascii=False)}\n\n"
 
-    # 流式结束后持久化会话并创建 qa_log
     from app.web.db import db
 
-    tenant_id = user.get("tenant_id", "default")
     db.ensure_session(user["id"], session_id, message[:40], tenant_id=tenant_id)
     db.add_message(session_id, user["id"], "user", message, tenant_id=tenant_id)
     qa_log = db.add_qa_log(
@@ -161,17 +177,23 @@ def delete_session(session_id: str, user: dict = Depends(get_current_user)) -> d
 
 @router.get("/documents")
 async def documents(user: dict = Depends(get_current_user)) -> list[dict]:
-    async with AgentRuntime(tenant_id=user.get("tenant_id", "default")) as runtime:
+    tenant_id = user.get("tenant_id")
+    if not tenant_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="当前账号没有关联租户")
+    async with AgentRuntime(tenant_id=tenant_id) as runtime:
         docs = list_documents(runtime.storage_manager)
-    records = {item["id"]: item for item in db.list_document_records(tenant_id=user.get("tenant_id"))}
+    records = {item["id"]: item for item in db.list_document_records(tenant_id=tenant_id)}
     for doc in docs:
         doc.update({k: v for k, v in records.get(doc["id"], {}).items() if k not in {"id"}})
+        doc.setdefault("entities", 0)
+        doc.setdefault("relationships", 0)
     return docs
 
 
 @router.post("/feedback")
 def feedback(payload: FeedbackRequest, user: dict = Depends(get_current_user)) -> dict:
-    return db.add_feedback(payload.qa_log_id, user["id"], payload.rating, payload.comment, tenant_id=user.get("tenant_id", "default"))
+    return db.add_feedback(payload.qa_log_id, user["id"], payload.rating, payload.comment,
+                           tenant_id=user.get("tenant_id", "default"))
 
 
 def _public_user(user: dict) -> dict:

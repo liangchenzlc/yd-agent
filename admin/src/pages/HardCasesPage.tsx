@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useDispatch, useSelector } from 'react-redux'
-import { api, type HardCaseRecord } from '../api'
+import { api, type ApiTenant, type HardCaseRecord } from '../api'
 import { AdminLayout } from '../components/AdminLayout'
 import { type RootState, setHardCases } from '../store'
 
@@ -23,18 +23,29 @@ function reasonOf(item: HardCaseRecord) {
 export function HardCasesPage() {
   const dispatch = useDispatch()
   const { items } = useSelector((state: RootState) => state.hardCases)
+  const { user } = useSelector((state: RootState) => state.auth)
+  const isSuperAdmin = user?.role === 'super_admin'
   const [keyword, setKeyword] = useState('')
   const [expandedId, setExpandedId] = useState<number | null>(null)
   const [message, setMessage] = useState('')
+  const [tenants, setTenants] = useState<ApiTenant[]>([])
+  const [selectedTenant, setSelectedTenant] = useState('')
+
+  useEffect(() => {
+    if (isSuperAdmin) {
+      api<ApiTenant[]>('/api/admin/tenants').then(setTenants).catch(() => {})
+    }
+  }, [isSuperAdmin])
 
   const loadHardCases = useCallback(async () => {
     try {
-      dispatch(setHardCases(await api<HardCaseRecord[]>('/api/admin/hard-cases')))
+      const params = isSuperAdmin && selectedTenant ? `?tenant_id=${selectedTenant}` : ''
+      dispatch(setHardCases(await api<HardCaseRecord[]>(`/api/admin/hard-cases${params}`)))
       setMessage('')
     } catch (err) {
       setMessage(err instanceof Error ? err.message : '加载难例失败')
     }
-  }, [dispatch])
+  }, [dispatch, isSuperAdmin, selectedTenant])
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -65,6 +76,17 @@ export function HardCasesPage() {
         <button onClick={loadHardCases}>刷新</button>
       </header>
 
+      {isSuperAdmin && (
+        <section className="panel filter-panel" style={{ gridTemplateColumns: 'minmax(200px, 1fr)' }}>
+          <select value={selectedTenant} onChange={(e) => setSelectedTenant(e.target.value)}>
+            <option value="">全部租户</option>
+            {tenants.map((t) => (
+              <option key={t.id} value={t.id}>{t.name} ({t.id})</option>
+            ))}
+          </select>
+        </section>
+      )}
+
       <section className="panel filter-panel single">
         <input
           value={keyword}
@@ -89,6 +111,7 @@ export function HardCasesPage() {
                   <div>
                     <span className="badge">{reasonOf(item)}</span>
                     <span className="muted"> #{item.id} · user {item.user_id}</span>
+                    {item.tenant_name && <span className="pill">{item.tenant_name}</span>}
                   </div>
                   <div className="qa-log-meta">
                     <span>{workers.join(', ') || 'none'}</span>

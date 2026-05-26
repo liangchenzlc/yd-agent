@@ -88,9 +88,14 @@ class ReportTool(BaseTool):
         output_dir = self._get_output_dir()
         output_path = output_dir / output_filename
 
-        if output_filename.lower().endswith(".html"):
-            return self._render_plotly(chart_type, data, title, output_path)
-        return self._render_matplotlib(chart_type, data, title, output_path)
+        try:
+            if output_filename.lower().endswith(".html"):
+                return self._render_plotly(chart_type, data, title, output_path)
+            return self._render_matplotlib(chart_type, data, title, output_path)
+        except KeyError as e:
+            return f"生成 {chart_type} 图表缺少必要参数: {e}"
+        except Exception as e:
+            return f"生成 {chart_type} 图表失败: {e}"
 
     # ---- 独立工具函数 ----
 

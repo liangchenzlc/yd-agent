@@ -1,32 +1,51 @@
 from __future__ import annotations
 
+from sqlalchemy import create_engine, inspect, text
+
 from app.agent.tools.base import BaseTool, as_tool
 
 
 class DatabaseTool(BaseTool):
-    """数据库查询工具 — 提供只读的 SQL 数据库访问能力。"""
+    """数据库查询工具 — 提供只读的 SQL 数据库访问能力。
+
+    默认实例通过 ToolRegistry 注册为单例；租户级使用时可传入 db_config 创建独立实例。
+    不再使用全局 Settings 中的数据库配置（已迁移为租户级数据源管理）。
+    """
 
     name = "database"
     description = "数据库查询工具"
 
+    def __init__(self, db_config: dict | None = None):
+        self._db_config = db_config
+
     def _get_engine(self):
-        """惰性创建 SQLAlchemy engine。"""
-        from sqlalchemy import create_engine
+        """根据 self._db_config 创建 SQLAlchemy engine。
 
-        from app.config.settings import get_settings
-
-        settings = get_settings()
-        if not settings.db_database:
+        SQLite: database 为文件路径，自动转换 Windows 反斜杠。
+        MySQL/Pg: 标准 host:port/user/pass/database 连接。
+        无配置时返回 None（由调用方处理"未配置"提示）。
+        """
+        cfg = self._db_config
+        if not cfg:
             return None
 
-        port = settings.db_port or 3306
-        if settings.db_type == "sqlite":
-            conn_str = f"sqlite:///{settings.db_host}"
-        elif settings.db_type == "postgresql":
-            conn_str = f"postgresql://{settings.db_user}:{settings.db_password}@{settings.db_host}:{port}/{settings.db_database}"
+        db = cfg.get("database") or cfg.get("db_database")
+        if not db:
+            return None
+
+        if cfg.get("type") == "sqlite":
+            db_path = str(db).replace("\\", "/")
+            return create_engine(f"sqlite:///{db_path}", connect_args={"timeout": 10})
+
+        port = cfg.get("port") or cfg.get("db_port") or 3306
+        pw = cfg.get("password", "") or cfg.get("db_password", "")
+        host = cfg.get("host", "localhost") or cfg.get("db_host", "localhost")
+        user = cfg.get("user", "") or cfg.get("db_user", "")
+        if cfg.get("type") == "postgresql":
+            conn_str = f"postgresql://{user}:{pw}@{host}:{port}/{db}"
         else:
-            conn_str = f"mysql+pymysql://{settings.db_user}:{settings.db_password}@{settings.db_host}:{port}/{settings.db_database}"
-        return create_engine(conn_str)
+            conn_str = f"mysql+pymysql://{user}:{pw}@{host}:{port}/{db}"
+        return create_engine(conn_str, connect_args={"connect_timeout": 10})
 
     @staticmethod
     def _is_select_query(query: str) -> bool:
@@ -58,12 +77,9 @@ class DatabaseTool(BaseTool):
         engine = self._get_engine()
         if engine is None:
             return "错误：数据库未配置，请在环境变量中设置数据库连接信息。"
-        from sqlalchemy import inspect
-
         try:
             with engine.connect() as conn:
-                inspector = inspect(conn)
-                tables = inspector.get_table_names()
+                tables = inspect(conn).get_table_names()
             if not tables:
                 return "数据库中未找到任何表。"
             lines = [f"共 {len(tables)} 张表：", ""]
@@ -71,7 +87,7 @@ class DatabaseTool(BaseTool):
                 lines.append(f"  - {t}")
             return "\n".join(lines)
         except Exception as e:
-            return f"查询表名失败：{e}"
+            return f"查询表名失败（{e}）"
 
     @as_tool(
         name="get_table_schema",
@@ -82,13 +98,10 @@ class DatabaseTool(BaseTool):
         engine = self._get_engine()
         if engine is None:
             return "错误：数据库未配置。"
-        from sqlalchemy import inspect
-
         try:
             with engine.connect() as conn:
-                inspector = inspect(conn)
-                columns = inspector.get_columns(table_name)
-                pk_constraint = inspector.get_pk_constraint(table_name)
+                columns = inspect(conn).get_columns(table_name)
+                pk_constraint = inspect(conn).get_pk_constraint(table_name)
                 pk_columns = pk_constraint.get("constrained_columns", []) if pk_constraint else []
 
             if not columns:
@@ -107,7 +120,7 @@ class DatabaseTool(BaseTool):
                 lines.append(f"\n主键: {', '.join(pk_columns)}")
             return "\n".join(lines)
         except Exception as e:
-            return f"查询表结构失败：{e}"
+            return f"查询表结构失败（{e}）"
 
     @as_tool(
         name="execute_sql",
@@ -121,7 +134,6 @@ class DatabaseTool(BaseTool):
         engine = self._get_engine()
         if engine is None:
             return "错误：数据库未配置。"
-        from sqlalchemy import text
 
         try:
             with engine.connect() as conn:
@@ -142,7 +154,7 @@ class DatabaseTool(BaseTool):
                     summary += "（仅显示前 200 行，如需更多数据请添加 LIMIT 子句）"
                 return "\n".join(lines) + summary
         except Exception as e:
-            return f"SQL 执行失败：{e}"
+            return f"SQL 执行失败（{e}）"
 
     @as_tool(
         name="precheck_sql",
@@ -156,7 +168,6 @@ class DatabaseTool(BaseTool):
         engine = self._get_engine()
         if engine is None:
             return "错误：数据库未配置。"
-        from sqlalchemy import text
 
         try:
             with engine.connect() as conn:
@@ -168,4 +179,4 @@ class DatabaseTool(BaseTool):
                     lines.append(f"  {row}")
                 return "\n".join(lines)
         except Exception as e:
-            return f"SQL 预检查失败（语法错误）：{e}"
+            return f"SQL 预检查失败：{e}"

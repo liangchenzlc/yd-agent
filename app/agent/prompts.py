@@ -1,8 +1,12 @@
+import re
+
+
 def fill_prompt(template: str, **kwargs: str) -> str:
-    """替换模板中的 {placeholder} 占位符。"""
-    for key, value in kwargs.items():
-        template = template.replace(f"{{{key}}}", value)
-    return template
+    """替换模板中的 {placeholder} 占位符，仅替换 kwargs 中存在的键。"""
+    def _replacer(m: re.Match) -> str:
+        key = m.group(1)
+        return kwargs.get(key, m.group(0))
+    return re.sub(r'\{(\w+)\}', _replacer, template)
 
 
 SUPERVISOR_PROMPT = """## 角色
@@ -92,16 +96,26 @@ DATA_ANALYST_PROMPT = """## 角色
 ## 用户需求
 {user_message}
 
-## 工具
+## 数据库结构（已预取）
+{db_context}
+
+## 可用工具
 {tools_description}
 
+## 执行流程
+数据库结构和样本数据已在上面给出，你通常不需要再次调用 list_tables 或 get_table_schema。
+请按以下流程执行：
+1. 根据已有表结构编写 SQL 查询（使用 execute_sql 工具）
+2. 分析查询结果
+3. 如需要图表，调用 generate_bar_chart / generate_line_chart 等绘图工具
+4. 给出数据分析结论和关键发现
+
 ## 规则
-1. 首先使用 list_tables 和 get_table_schema 了解数据库结构，再编写查询。
-2. 在执行查询前必须使用 precheck_sql 验证 SQL 语法。
-3. 只执行 SELECT 查询，绝不修改数据库。
-4. 查询结果较多时应使用 LIMIT 子句限制返回行数。
-5. 生成图表前确保数据已经过查询验证。
-6. 最终输出应包含数据分析结论和关键发现。
+1. 在执行自定义查询前必须使用 precheck_sql 验证 SQL 语法。
+2. 只执行 SELECT 查询，绝不修改数据库。
+3. 查询结果较多时应使用 LIMIT 子句限制返回行数。
+4. 生成图表前确保数据已经过查询验证。
+5. 最终输出应包含数据分析结论和关键发现。
 """
 
 SUMMARY_PROMPT = """## 角色

@@ -104,7 +104,11 @@ class ToolRegistry:
 
     @classmethod
     def get(cls, name: str) -> BaseTool:
-        return cls._tools[name]
+        tool = cls._tools.get(name)
+        if tool is None:
+            registered = list(cls._tools.keys())
+            raise KeyError(f"工具 '{name}' 未注册。已注册工具: {registered}")
+        return tool
 
     @classmethod
     def get_lc_tools(cls, tool_names: list[str]) -> list:
@@ -133,7 +137,7 @@ class ToolRegistry:
             # None 结果仍需返回空字符串，否则后续 LLM 调用可能因 None 类型报错
             return str(result) if result is not None else ""
         except Exception as e:
-            return f"工具 '{tool_name}' 执行失败: {e}"
+            return f"工具 '{tool_name}' 执行失败（{e}）"
 
     @classmethod
     async def aexecute_tool(cls, tool_name: str, **kwargs) -> str:
@@ -149,7 +153,7 @@ class ToolRegistry:
             result = await asyncio.to_thread(lc_tool.invoke, kwargs)
             return str(result) if result is not None else ""
         except Exception as e:
-            return f"工具 '{tool_name}' 执行失败: {e}"
+            return f"工具 '{tool_name}' 执行失败（{e}）"
 
     @classmethod
     def get_all(cls) -> list[BaseTool]:

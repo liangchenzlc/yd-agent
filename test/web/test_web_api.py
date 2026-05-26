@@ -5,7 +5,7 @@ from fastapi.testclient import TestClient
 
 def test_admin_login_and_chat(monkeypatch, tmp_path):
     from app.web import main
-    from app.web.auth import ensure_default_admin
+    from app.web.auth import ensure_super_admin
     from app.web.db import WebDatabase
 
     test_db = WebDatabase(tmp_path / "web.db")
@@ -15,7 +15,7 @@ def test_admin_login_and_chat(monkeypatch, tmp_path):
     monkeypatch.setattr("app.api.routes.user.db", test_db)
     monkeypatch.setattr("app.api.routes.admin.db", test_db)
     test_db.initialize()
-    ensure_default_admin()
+    ensure_super_admin()
 
     async def fake_chat_turn(user, message, session_id=None):
         resolved_session_id = session_id or "session-test"
@@ -100,7 +100,7 @@ def test_admin_login_and_chat(monkeypatch, tmp_path):
 
 def test_register_endpoint_removed(monkeypatch, tmp_path):
     from app.web import main
-    from app.web.auth import ensure_default_admin
+    from app.web.auth import ensure_super_admin
     from app.web.db import WebDatabase
 
     test_db = WebDatabase(tmp_path / "web.db")
@@ -109,7 +109,7 @@ def test_register_endpoint_removed(monkeypatch, tmp_path):
     monkeypatch.setattr("app.api.routes.user.db", test_db)
     monkeypatch.setattr("app.api.routes.admin.db", test_db)
     test_db.initialize()
-    ensure_default_admin()
+    ensure_super_admin()
 
     with TestClient(main.app) as client:
         response = client.post("/api/auth/register", json={"username": "bob", "password": "secret123"})

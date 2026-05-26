@@ -11,7 +11,7 @@ from app.api.routes.admin import router as admin_router
 from app.api.routes.user import router as user_router
 from app.config.logging import setup_logging
 from app.config.settings import get_settings
-from app.web.auth import decode_token, ensure_default_admin, _secret
+from app.web.auth import decode_token, ensure_super_admin, _secret
 from app.web.db import db
 from app.agent.storage.redis_cache import redis_cache
 from app.agent.tools import ToolRegistry
@@ -41,7 +41,7 @@ async def lifespan(_: FastAPI):
     logger.info("Starting yd-Agent server")
     db.initialize()
     redis_cache.initialize()
-    ensure_default_admin()
+    ensure_super_admin()
     ToolRegistry.init_defaults()
     logger.info("Server initialization complete")
     yield

@@ -1,6 +1,6 @@
 import { type ChangeEvent, useCallback, useEffect, useState } from 'react'
 import { useDispatch, useSelector } from 'react-redux'
-import { api, type DocumentRecord } from '../api'
+import { api, type DocumentRecord, type ApiTenant } from '../api'
 import { AdminLayout } from '../components/AdminLayout'
 import { type RootState, setDocuments } from '../store'
 
@@ -23,18 +23,33 @@ function TrashIcon() {
 export function DocumentsPage() {
   const dispatch = useDispatch()
   const { items } = useSelector((state: RootState) => state.documents)
+  const { user } = useSelector((state: RootState) => state.auth)
+  const isSuperAdmin = user?.role === 'super_admin'
   const [file, setFile] = useState<File | null>(null)
   const [message, setMessage] = useState('')
   const [busy, setBusy] = useState(false)
   const [dragOver, setDragOver] = useState(false)
+  const [tenants, setTenants] = useState<ApiTenant[]>([])
+  const [selectedTenant, setSelectedTenant] = useState('')
+
+  useEffect(() => {
+    if (isSuperAdmin) {
+      api<ApiTenant[]>('/api/admin/tenants').then(setTenants).catch(() => {})
+    }
+  }, [isSuperAdmin])
 
   const loadDocuments = useCallback(async () => {
     try {
-      dispatch(setDocuments(await api<DocumentRecord[]>('/api/admin/documents')))
+      if (isSuperAdmin && !selectedTenant) {
+        dispatch(setDocuments([]))
+        return
+      }
+      const params = isSuperAdmin ? `?tenant_id=${selectedTenant}` : ''
+      dispatch(setDocuments(await api<DocumentRecord[]>(`/api/admin/documents${params}`)))
     } catch {
       setMessage('加载文档列表失败')
     }
-  }, [dispatch])
+  }, [dispatch, isSuperAdmin, selectedTenant])
 
   useEffect(() => { loadDocuments() }, [loadDocuments])
 
@@ -63,6 +78,7 @@ export function DocumentsPage() {
     try {
       const form = new FormData()
       form.append('file', file)
+      if (isSuperAdmin && selectedTenant) form.append('tenant_id', selectedTenant)
       await api('/api/admin/documents', { method: 'POST', body: form })
       setFile(null)
       setMessage('文档已上传并完成索引')
@@ -77,7 +93,8 @@ export function DocumentsPage() {
     setBusy(true)
     setMessage('正在删除文档...')
     try {
-      await api(`/api/admin/documents/${docId}`, { method: 'DELETE' })
+      const deleteParams = isSuperAdmin && selectedTenant ? `?tenant_id=${selectedTenant}` : ''
+      await api(`/api/admin/documents/${docId}${deleteParams}`, { method: 'DELETE' })
       setMessage('文档已删除')
       await loadDocuments()
     } catch (err) {
@@ -94,6 +111,20 @@ export function DocumentsPage() {
         </div>
         <button onClick={loadDocuments} disabled={busy}>刷新</button>
       </header>
+
+      {isSuperAdmin && (
+        <section className="panel filter-panel" style={{ gridTemplateColumns: 'minmax(200px, 1fr)' }}>
+          <select value={selectedTenant} onChange={(e) => setSelectedTenant(e.target.value)}>
+            <option value="">— 请选择租户 —</option>
+            {tenants.map((t) => (
+              <option key={t.id} value={t.id}>{t.name} ({t.id})</option>
+            ))}
+          </select>
+        </section>
+      )}
+      {isSuperAdmin && !selectedTenant && (
+        <div className="status">请先选择租户以查看和管理文档</div>
+      )}
 
       <section className="panel upload-panel">
         <div>
@@ -116,7 +147,7 @@ export function DocumentsPage() {
           />
         </div>
         <div className="upload-actions">
-          <button onClick={uploadDocument} disabled={busy || !file}>
+          <button onClick={uploadDocument} disabled={busy || !file || (isSuperAdmin && !selectedTenant)}>
             {busy ? '索引中...' : '上传并索引'}
           </button>
           {file && <button className="secondary compact" onClick={() => setFile(null)} style={{ width: 'auto' }}>取消选择</button>}

@@ -9,8 +9,8 @@ type AuthResponse = { token: string; user: ApiUser }
 export function LoginPage() {
   const dispatch = useDispatch()
   const navigate = useNavigate()
-  const [username, setUsername] = useState('admin')
-  const [password, setPassword] = useState('admin')
+  const [username, setUsername] = useState('')
+  const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
 
@@ -19,7 +19,7 @@ export function LoginPage() {
     setError('')
     setBusy(true)
     try {
-      const result = await api<AuthResponse>('/api/auth/login', {
+      const result = await api<AuthResponse>('/api/user/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username, password }),
@@ -43,6 +43,7 @@ export function LoginPage() {
           id="username"
           value={username}
           onChange={(event) => setUsername(event.target.value)}
+          placeholder="请输入用户名"
           autoFocus
         />
         <label htmlFor="password">密码</label>
@@ -50,6 +51,7 @@ export function LoginPage() {
           id="password"
           type="password"
           value={password}
+          placeholder="请输入密码"
           onChange={(event) => setPassword(event.target.value)}
         />
         <button type="submit" disabled={busy}>{busy ? '登录中...' : '登录'}</button>

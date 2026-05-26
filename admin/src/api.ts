@@ -3,7 +3,7 @@ export type ApiUser = {
   username: string
   role: string
   enabled?: boolean
-  tenant_id: string
+  tenant_id?: string | null
   created_at?: string
 }
 
@@ -15,6 +15,7 @@ export type DocumentRecord = {
   status?: string
   relationships?: number
   updated_at?: string
+  tenant_id?: string
 }
 
 export type QaLogRecord = {
@@ -28,6 +29,8 @@ export type QaLogRecord = {
   worker_results: string
   confidence: number | null
   created_at: string
+  tenant_id?: string
+  tenant_name?: string | null
 }
 
 export type HardCaseRecord = QaLogRecord & {
@@ -51,6 +54,19 @@ export type KnowledgeGapRecord = {
     answer: string
     comment?: string | null
   }>
+}
+
+export type DataSourceConfig = {
+  id: number
+  tenant_id: string
+  db_type: string
+  db_host: string
+  db_port: number | null
+  db_user: string
+  db_password: string
+  db_database: string
+  created_at: string
+  updated_at: string
 }
 
 export type ApiTenant = {

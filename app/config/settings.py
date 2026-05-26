@@ -48,14 +48,6 @@ class Settings(BaseSettings):
     redis_db: int = 0
     redis_password: str = ""
 
-    # Database (for data_analyst worker)
-    db_type: str = "mysql"
-    db_host: str = "localhost"
-    db_port: int | None = None
-    db_user: str = ""
-    db_password: str = ""
-    db_database: str = ""
-
     # Chart output (for data_analyst worker)
     charts_output_dir: str = "./data/charts"
 

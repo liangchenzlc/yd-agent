@@ -58,40 +58,57 @@ export function chatStreamSSE(
   const params = new URLSearchParams({ message })
   if (sessionId) params.set('session_id', sessionId)
   const url = `/api/chat/stream?${params}`
-  const eventSource = new EventSource(url)
+  let aborted = false
 
-  eventSource.addEventListener('meta', (e) => {
-    try { onEvent(JSON.parse(e.data)) } catch { /* skip malformed */ }
+  const token = localStorage.getItem('yd_token')
+  const headers: Record<string, string> = {}
+  if (token) headers['Authorization'] = `Bearer ${token}`
+
+  fetch(url, { headers }).then(async (response) => {
+    if (!response.ok) {
+      const text = await response.text().catch(() => '')
+      const detail = text ? ` (${text})` : ''
+      onError(`SSE 请求失败: ${response.status}${detail}`)
+      return
+    }
+
+    const reader = response.body?.getReader()
+    if (!reader) { onError('SSE 不支持当前浏览器'); return }
+
+    const decoder = new TextDecoder()
+    let buffer = ''
+    let currentEvent = ''
+
+    while (!aborted) {
+      const { done, value } = await reader.read()
+      if (done) break
+
+      buffer += decoder.decode(value, { stream: true })
+      const lines = buffer.split('\n')
+      buffer = lines.pop() || ''
+
+      for (const line of lines) {
+        if (line.startsWith('event: ')) {
+          currentEvent = line.slice(7).trim()
+        } else if (line.startsWith('data: ')) {
+          const data = line.slice(6)
+          try {
+            const parsed = JSON.parse(data)
+            if (currentEvent === 'done') {
+              onDone(parsed.session_id || sessionId, parsed.qa_log_id)
+              aborted = true
+            } else if (currentEvent === 'worker') {
+              onEvent({ ...parsed, type: 'worker' })
+            } else {
+              onEvent(parsed as StreamEvent)
+            }
+          } catch { /* skip malformed */ }
+        }
+      }
+    }
+  }).catch((err) => {
+    if (!aborted) onError(`SSE 连接失败: ${err.message}`)
   })
 
-  eventSource.addEventListener('supervisor', (e) => {
-    try { onEvent(JSON.parse(e.data)) } catch { /* skip malformed */ }
-  })
-
-  eventSource.addEventListener('worker', (e) => {
-    try { onEvent({ ...JSON.parse(e.data), type: 'worker' }) } catch { /* skip malformed */ }
-  })
-
-  eventSource.addEventListener('summary', (e) => {
-    try { onEvent(JSON.parse(e.data)) } catch { /* skip malformed */ }
-  })
-
-  eventSource.addEventListener('refiner', (e) => {
-    try { onEvent(JSON.parse(e.data)) } catch { /* skip malformed */ }
-  })
-
-  eventSource.addEventListener('done', (e) => {
-    try {
-      const data = JSON.parse(e.data)
-      onDone(data.session_id || sessionId, data.qa_log_id)
-    } catch { /* skip malformed */ }
-    eventSource.close()
-  })
-
-  eventSource.onerror = () => {
-    onError('SSE 连接中断')
-    eventSource.close()
-  }
-
-  return () => eventSource.close()
+  return () => { aborted = true }
 }

@@ -16,6 +16,11 @@ class RedisCache:
         self._client: Any = None
         self._enabled = False
 
+    @property
+    def is_enabled(self) -> bool:
+        """Redis 缓存是否可用。"""
+        return self._enabled
+
     def initialize(self):
         settings = get_settings()
         if not settings.redis_host:

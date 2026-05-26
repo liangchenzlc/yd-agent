@@ -222,6 +222,7 @@ input:focus, select:focus, textarea:focus {
   font-size: 12px;
   background: #f8fafc;
 }
+.pill.super { background: #fef3c7; color: #92400e; border-color: #fcd34d; }
 .mono { font-family: var(--font-mono); font-size: 13px; }
 .muted { color: var(--muted); font-size: 13px; }
 

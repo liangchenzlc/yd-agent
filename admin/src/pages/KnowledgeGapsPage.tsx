@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useDispatch, useSelector } from 'react-redux'
-import { api, type KnowledgeGapRecord } from '../api'
+import { api, type ApiTenant, type KnowledgeGapRecord } from '../api'
 import { AdminLayout } from '../components/AdminLayout'
 import { type RootState, setKnowledgeGaps } from '../store'
 
@@ -16,18 +16,29 @@ function topReason(item: KnowledgeGapRecord) {
 export function KnowledgeGapsPage() {
   const dispatch = useDispatch()
   const { items } = useSelector((state: RootState) => state.knowledgeGaps)
+  const { user } = useSelector((state: RootState) => state.auth)
+  const isSuperAdmin = user?.role === 'super_admin'
   const [keyword, setKeyword] = useState('')
   const [expandedQuestion, setExpandedQuestion] = useState<string | null>(null)
   const [message, setMessage] = useState('')
+  const [tenants, setTenants] = useState<ApiTenant[]>([])
+  const [selectedTenant, setSelectedTenant] = useState('')
+
+  useEffect(() => {
+    if (isSuperAdmin) {
+      api<ApiTenant[]>('/api/admin/tenants').then(setTenants).catch(() => {})
+    }
+  }, [isSuperAdmin])
 
   const loadKnowledgeGaps = useCallback(async () => {
     try {
-      dispatch(setKnowledgeGaps(await api<KnowledgeGapRecord[]>('/api/admin/knowledge-gaps')))
+      const params = isSuperAdmin && selectedTenant ? `?tenant_id=${selectedTenant}` : ''
+      dispatch(setKnowledgeGaps(await api<KnowledgeGapRecord[]>(`/api/admin/knowledge-gaps${params}`)))
       setMessage('')
     } catch (err) {
       setMessage(err instanceof Error ? err.message : '加载知识缺口失败')
     }
-  }, [dispatch])
+  }, [dispatch, isSuperAdmin, selectedTenant])
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -50,6 +61,17 @@ export function KnowledgeGapsPage() {
         </div>
         <button onClick={loadKnowledgeGaps}>刷新</button>
       </header>
+
+      {isSuperAdmin && (
+        <section className="panel filter-panel" style={{ gridTemplateColumns: 'minmax(200px, 1fr)' }}>
+          <select value={selectedTenant} onChange={(e) => setSelectedTenant(e.target.value)}>
+            <option value="">全部租户</option>
+            {tenants.map((t) => (
+              <option key={t.id} value={t.id}>{t.name} ({t.id})</option>
+            ))}
+          </select>
+        </section>
+      )}
 
       <section className="panel filter-panel single">
         <input

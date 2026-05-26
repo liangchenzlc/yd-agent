@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
-import { api } from '../api'
+import { useSelector } from 'react-redux'
+import { api, type ApiTenant } from '../api'
 import { AdminLayout } from '../components/AdminLayout'
+import { type RootState } from '../store'
 
 type DailyStats = {
   date: string
@@ -19,16 +21,29 @@ function SkeletonCard() {
 }
 
 export function UsagePage() {
+  const { user } = useSelector((state: RootState) => state.auth)
+  const isSuperAdmin = user?.role === 'super_admin'
   const [stats, setStats] = useState<DailyStats | null>(null)
   const [busy, setBusy] = useState(false)
+  const [tenants, setTenants] = useState<ApiTenant[]>([])
+  const [selectedTenant, setSelectedTenant] = useState('')
+
+  useEffect(() => {
+    if (isSuperAdmin) {
+      api<ApiTenant[]>('/api/admin/tenants').then(setTenants).catch(() => {})
+    }
+  }, [isSuperAdmin])
 
   const loadStats = useCallback(async () => {
     setBusy(true)
     try {
-      setStats(await api<DailyStats>('/api/admin/usage'))
+      const params = isSuperAdmin && selectedTenant ? `?tenant_id=${selectedTenant}` : ''
+      setStats(await api<DailyStats>(`/api/admin/usage${params}`))
     } catch { /* silently fail */ }
     finally { setBusy(false) }
-  }, [])
+  }, [isSuperAdmin, selectedTenant])
+
+  useEffect(() => { loadStats() }, [loadStats])
 
   useEffect(() => { loadStats() }, [loadStats])
 
@@ -41,6 +56,17 @@ export function UsagePage() {
         </div>
         <button onClick={loadStats} disabled={busy}>刷新</button>
       </header>
+
+      {isSuperAdmin && (
+        <section className="panel filter-panel" style={{ gridTemplateColumns: 'minmax(200px, 1fr)' }}>
+          <select value={selectedTenant} onChange={(e) => setSelectedTenant(e.target.value)}>
+            <option value="">全部租户</option>
+            {tenants.map((t) => (
+              <option key={t.id} value={t.id}>{t.name} ({t.id})</option>
+            ))}
+          </select>
+        </section>
+      )}
 
       <section className="stats-cards">
         {stats ? (

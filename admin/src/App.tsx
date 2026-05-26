@@ -4,6 +4,7 @@ import { HardCasesPage } from './pages/HardCasesPage'
 import { KnowledgeGapsPage } from './pages/KnowledgeGapsPage'
 import { LoginPage } from './pages/LoginPage'
 import { QaLogsPage } from './pages/QaLogsPage'
+import { DataSourcesPage } from './pages/DataSourcesPage'
 import { TenantsPage } from './pages/TenantsPage'
 import { UsagePage } from './pages/UsagePage'
 import { UsersPage } from './pages/UsersPage'
@@ -62,6 +63,22 @@ export default function App() {
         element={
           <RequireAdmin>
             <UsersPage />
+          </RequireAdmin>
+        }
+      />
+      <Route
+        path="/admin-users"
+        element={
+          <RequireAdmin>
+            <UsersPage />
+          </RequireAdmin>
+        }
+      />
+      <Route
+        path="/data-sources"
+        element={
+          <RequireAdmin>
+            <DataSourcesPage />
           </RequireAdmin>
         }
       />

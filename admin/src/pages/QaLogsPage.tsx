@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useDispatch, useSelector } from 'react-redux'
-import { api, type QaLogRecord } from '../api'
+import { api, type ApiTenant, type QaLogRecord } from '../api'
 import { AdminLayout } from '../components/AdminLayout'
 import { type RootState, setQaLogs } from '../store'
 
@@ -25,20 +25,31 @@ function formatConfidence(value: number | null) {
 export function QaLogsPage() {
   const dispatch = useDispatch()
   const { items } = useSelector((state: RootState) => state.qaLogs)
+  const { user } = useSelector((state: RootState) => state.auth)
+  const isSuperAdmin = user?.role === 'super_admin'
   const [keyword, setKeyword] = useState('')
   const [worker, setWorker] = useState('all')
   const [lowConfidenceOnly, setLowConfidenceOnly] = useState(false)
   const [expandedId, setExpandedId] = useState<number | null>(null)
   const [message, setMessage] = useState('')
+  const [tenants, setTenants] = useState<ApiTenant[]>([])
+  const [selectedTenant, setSelectedTenant] = useState('')
+
+  useEffect(() => {
+    if (isSuperAdmin) {
+      api<ApiTenant[]>('/api/admin/tenants').then(setTenants).catch(() => {})
+    }
+  }, [isSuperAdmin])
 
   const loadQaLogs = useCallback(async () => {
     try {
-      dispatch(setQaLogs(await api<QaLogRecord[]>('/api/admin/qa-logs')))
+      const params = isSuperAdmin && selectedTenant ? `?tenant_id=${selectedTenant}` : ''
+      dispatch(setQaLogs(await api<QaLogRecord[]>(`/api/admin/qa-logs${params}`)))
       setMessage('')
     } catch (err) {
       setMessage(err instanceof Error ? err.message : '加载问答日志失败')
     }
-  }, [dispatch])
+  }, [dispatch, isSuperAdmin, selectedTenant])
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -82,6 +93,17 @@ export function QaLogsPage() {
         <button onClick={loadQaLogs}>刷新</button>
       </header>
 
+      {isSuperAdmin && (
+        <section className="panel filter-panel" style={{ gridTemplateColumns: 'minmax(200px, 1fr)' }}>
+          <select value={selectedTenant} onChange={(e) => setSelectedTenant(e.target.value)}>
+            <option value="">全部租户</option>
+            {tenants.map((t) => (
+              <option key={t.id} value={t.id}>{t.name} ({t.id})</option>
+            ))}
+          </select>
+        </section>
+      )}
+
       <section className="panel filter-panel">
         <input
           value={keyword}
@@ -120,6 +142,7 @@ export function QaLogsPage() {
                 <div>
                   <span className="mono">#{item.id}</span>
                   <span className="muted"> session {item.session_id}</span>
+                  {item.tenant_name && <span className="pill">{item.tenant_name}</span>}
                 </div>
                 <div className="qa-log-meta">
                   <span>{item.workerList.join(', ') || 'none'}</span>

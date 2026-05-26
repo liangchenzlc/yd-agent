@@ -46,6 +46,7 @@ class AgentState(TypedDict):
 
     user_id: str
     session_id: str
+    tenant_id: str
     # load_memory 节点填充，供所有下游节点参考
     user_profile: dict
     relevant_memories: list[dict]

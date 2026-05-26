@@ -13,7 +13,8 @@ from app.web.db import db
 SESSION_TTL = 3600  # 1 hour cache for session data
 
 
-def _state_from_messages(messages: list[BaseMessage], user_id: str, session_id: str) -> AgentState:
+def _state_from_messages(messages: list[BaseMessage], user_id: str, session_id: str,
+                         tenant_id: str = "default") -> AgentState:
     return AgentState(
         messages=messages,
         worker_assignments=[],
@@ -26,6 +27,7 @@ def _state_from_messages(messages: list[BaseMessage], user_id: str, session_id: 
         final_answer="",
         user_id=user_id,
         session_id=session_id,
+        tenant_id=tenant_id,
         user_profile={},
         relevant_memories=[],
         session_history=[],
@@ -68,7 +70,7 @@ async def run_chat_turn(user: dict, message: str, session_id: str | None = None)
     messages = _messages_from_history(history, message)
 
     async with AgentRuntime(tenant_id=tenant_id) as runtime:
-        state = _state_from_messages(messages, str(user["id"]), resolved_session_id)
+        state = _state_from_messages(messages, str(user["id"]), resolved_session_id, tenant_id=tenant_id)
         result = await runtime.graph.ainvoke(state)
 
     answer = result.get("final_answer", "")
@@ -80,7 +82,7 @@ async def run_chat_turn(user: dict, message: str, session_id: str | None = None)
     await track_api_call(user["id"], tenant_id, "/api/chat")
     input_tokens = estimate_tokens(message)
     output_tokens = estimate_tokens(answer)
-    await track_llm_tokens(user["id"], "chat", input_tokens, output_tokens)
+    await track_llm_tokens(user["id"], "chat", input_tokens, output_tokens, tenant_id=tenant_id)
 
     # 持久化到 SQLite（先创建 qa_log 拿到 id，再保存 assistant 消息）
     db.add_message(resolved_session_id, user["id"], "user", message, tenant_id=tenant_id)

@@ -15,7 +15,7 @@ def utc_now() -> str:
 
 
 class WebDatabase:
-    """Small SQLite persistence layer for the Web MVP."""
+    """SQLite persistence layer for Web MVP."""
 
     def __init__(self, db_path: str | Path | None = None):
         settings = get_settings()
@@ -40,8 +40,9 @@ class WebDatabase:
                     id integer primary key autoincrement,
                     username text not null unique,
                     password_hash text not null,
-                    role text not null default 'employee',
+                    role text not null default 'user',
                     enabled integer not null default 1,
+                    tenant_id text,
                     created_at text not null
                 );
 
@@ -51,6 +52,7 @@ class WebDatabase:
                     title text not null,
                     created_at text not null,
                     updated_at text not null,
+                    tenant_id text not null default 'default',
                     foreign key(user_id) references users(id)
                 );
 
@@ -61,6 +63,8 @@ class WebDatabase:
                     role text not null,
                     content text not null,
                     created_at text not null,
+                    tenant_id text not null default 'default',
+                    qa_log_id integer,
                     foreign key(session_id) references chat_sessions(id),
                     foreign key(user_id) references users(id)
                 );
@@ -75,7 +79,8 @@ class WebDatabase:
                     dispatch_reasoning text not null,
                     worker_results text not null,
                     confidence real,
-                    created_at text not null
+                    created_at text not null,
+                    tenant_id text not null default 'default'
                 );
 
                 create table if not exists documents (
@@ -85,7 +90,8 @@ class WebDatabase:
                     status text not null,
                     chunks integer not null default 0,
                     created_at text not null,
-                    updated_at text not null
+                    updated_at text not null,
+                    tenant_id text not null default 'default'
                 );
 
                 create table if not exists feedback (
@@ -95,6 +101,7 @@ class WebDatabase:
                     rating integer not null,
                     comment text not null default '',
                     created_at text not null,
+                    tenant_id text not null default 'default',
                     foreign key(qa_log_id) references qa_logs(id),
                     foreign key(user_id) references users(id)
                 );
@@ -114,10 +121,21 @@ class WebDatabase:
                     created_at text not null,
                     updated_at text not null
                 );
+
+                create table if not exists data_sources (
+                    id integer primary key autoincrement,
+                    tenant_id text not null unique,
+                    db_type text not null default 'mysql',
+                    db_host text not null default 'localhost',
+                    db_port integer,
+                    db_user text,
+                    db_password text,
+                    db_database text not null,
+                    created_at text not null,
+                    updated_at text not null
+                );
                 """
             )
-            self._ensure_column(conn, "users", "enabled", "integer not null default 1")
-            self._ensure_column(conn, "users", "tenant_id", "text not null default 'default'")
             self._ensure_column(conn, "chat_sessions", "tenant_id", "text not null default 'default'")
             self._ensure_column(conn, "messages", "tenant_id", "text not null default 'default'")
             self._ensure_column(conn, "messages", "qa_log_id", "integer")
@@ -125,43 +143,49 @@ class WebDatabase:
             self._ensure_column(conn, "documents", "tenant_id", "text not null default 'default'")
             self._ensure_column(conn, "feedback", "tenant_id", "text not null default 'default'")
 
-        with self.connect() as conn:
-            if conn.execute("select count(*) from tenants").fetchone()[0] == 0:
-                conn.execute(
-                    "insert into tenants(id, name, config, created_at, updated_at) values (?, ?, ?, ?, ?)",
-                    ("default", "默认租户", "{}", utc_now(), utc_now()),
-                )
+    # ---- User CRUD ----
 
-    def create_user(self, username: str, password_hash: str, role: str = "employee", tenant_id: str = "default") -> dict[str, Any]:
+    def create_user(self, username: str, password_hash: str, role: str = "user",
+                    tenant_id: str | None = None) -> dict[str, Any]:
+        ALLOWED_ROLES = {"super_admin", "admin", "user"}
+        if role not in ALLOWED_ROLES:
+            raise ValueError(f"非法角色: {role}，允许: {', '.join(sorted(ALLOWED_ROLES))}")
         with self.connect() as conn:
             cur = conn.execute(
-                "insert into users(username, password_hash, role, enabled, tenant_id, created_at) values (?, ?, ?, ?, ?, ?)",
-                (username, password_hash, role, 1, tenant_id, utc_now()),
+                "insert into users(username, password_hash, role, enabled, tenant_id, created_at) "
+                "values (?, ?, ?, 1, ?, ?)",
+                (username, password_hash, role, tenant_id, utc_now()),
             )
             return self.get_user_by_id(cur.lastrowid, conn=conn)
 
-    def list_users(self, tenant_id: str | None = None) -> list[dict[str, Any]]:
-        with self.connect() as conn:
-            if tenant_id:
-                rows = conn.execute(
-                    "select id, username, role, enabled, tenant_id, created_at from users where tenant_id = ? order by id asc",
-                    (tenant_id,),
-                ).fetchall()
-            else:
-                rows = conn.execute(
-                    "select id, username, role, enabled, tenant_id, created_at from users order by id asc"
-                ).fetchall()
-            return [dict(row) for row in rows]
-
-    def update_user(self, user_id: int, role: str | None = None, enabled: bool | None = None) -> dict[str, Any] | None:
-        updates = []
+    def list_users(self, role: str | None = None, tenant_id: str | None = None) -> list[dict[str, Any]]:
+        """按角色和租户过滤用户。role/tenant_id 为 None 表示不限制。"""
+        conditions = []
         params: list[Any] = []
         if role is not None:
-            updates.append("role = ?")
+            conditions.append("role = ?")
             params.append(role)
+        if tenant_id is not None:
+            conditions.append("tenant_id = ?")
+            params.append(tenant_id)
+        where = " where " + " and ".join(conditions) if conditions else ""
+        with self.connect() as conn:
+            rows = conn.execute(
+                f"select id, username, role, enabled, tenant_id, created_at from users{where} order by id asc",
+                params,
+            ).fetchall()
+            return [dict(row) for row in rows]
+
+    def update_user(self, user_id: int, enabled: bool | None = None,
+                    password_hash: str | None = None) -> dict[str, Any] | None:
+        updates = []
+        params: list[Any] = []
         if enabled is not None:
             updates.append("enabled = ?")
             params.append(1 if enabled else 0)
+        if password_hash is not None:
+            updates.append("password_hash = ?")
+            params.append(password_hash)
         if not updates:
             return self.get_user_by_id(user_id)
         params.append(user_id)
@@ -169,20 +193,24 @@ class WebDatabase:
             conn.execute(f"update users set {', '.join(updates)} where id = ?", params)
             return self.get_user_by_id(user_id, conn=conn)
 
+    def delete_user(self, user_id: int) -> bool:
+        with self.connect() as conn:
+            cur = conn.execute("delete from users where id = ?", (user_id,))
+            return cur.rowcount > 0
+
     def count_users(self) -> int:
         with self.connect() as conn:
             row = conn.execute("select count(*) as total from users").fetchone()
             return int(row["total"])
 
-    def get_user_by_username(self, username: str, tenant_id: str | None = None) -> dict[str, Any] | None:
+    def count_by_role(self, role: str) -> int:
         with self.connect() as conn:
-            if tenant_id:
-                row = conn.execute(
-                    "select * from users where username = ? and tenant_id = ?",
-                    (username, tenant_id),
-                ).fetchone()
-            else:
-                row = conn.execute("select * from users where username = ?", (username,)).fetchone()
+            row = conn.execute("select count(*) as total from users where role = ?", (role,)).fetchone()
+            return int(row["total"])
+
+    def get_user_by_username(self, username: str) -> dict[str, Any] | None:
+        with self.connect() as conn:
+            row = conn.execute("select * from users where username = ?", (username,)).fetchone()
             return dict(row) if row else None
 
     def get_user_by_id(self, user_id: int, conn: sqlite3.Connection | None = None) -> dict[str, Any] | None:
@@ -199,11 +227,14 @@ class WebDatabase:
         if column not in {row["name"] for row in rows}:
             conn.execute(f"alter table {table} add column {column} {definition}")
 
+    # ---- Session / Message / QA Log ----
+
     def create_session(self, user_id: int, session_id: str, title: str, tenant_id: str = "default") -> dict[str, Any]:
         now = utc_now()
         with self.connect() as conn:
             conn.execute(
-                "insert into chat_sessions(id, user_id, title, created_at, updated_at, tenant_id) values (?, ?, ?, ?, ?, ?)",
+                "insert into chat_sessions(id, user_id, title, created_at, updated_at, tenant_id) "
+                "values (?, ?, ?, ?, ?, ?)",
                 (session_id, user_id, title, now, now, tenant_id),
             )
         return {"id": session_id, "user_id": user_id, "title": title, "created_at": now, "updated_at": now}
@@ -237,18 +268,21 @@ class WebDatabase:
             cur = conn.execute("delete from chat_sessions where id = ? and user_id = ?", (session_id, user_id))
             return cur.rowcount > 0
 
-    def add_message(self, session_id: str, user_id: int, role: str, content: str, tenant_id: str = "default", qa_log_id: int | None = None) -> dict[str, Any]:
+    def add_message(self, session_id: str, user_id: int, role: str, content: str,
+                    tenant_id: str = "default", qa_log_id: int | None = None) -> dict[str, Any]:
         now = utc_now()
         with self.connect() as conn:
             cur = conn.execute(
-                "insert into messages(session_id, user_id, role, content, created_at, tenant_id, qa_log_id) values (?, ?, ?, ?, ?, ?, ?)",
+                "insert into messages(session_id, user_id, role, content, created_at, tenant_id, qa_log_id) "
+                "values (?, ?, ?, ?, ?, ?, ?)",
                 (session_id, user_id, role, content, now, tenant_id, qa_log_id),
             )
             conn.execute(
                 "update chat_sessions set updated_at = ? where id = ? and user_id = ?",
                 (now, session_id, user_id),
             )
-            return {"id": cur.lastrowid, "session_id": session_id, "role": role, "content": content, "created_at": now, "qa_log_id": qa_log_id}
+            return {"id": cur.lastrowid, "session_id": session_id, "role": role,
+                    "content": content, "created_at": now, "qa_log_id": qa_log_id}
 
     def update_message_qa_log(self, message_id: int, qa_log_id: int) -> None:
         with self.connect() as conn:
@@ -314,6 +348,8 @@ class WebDatabase:
                 rows = conn.execute("select * from qa_logs order by id desc limit ?", (limit,)).fetchall()
             return [dict(row) for row in rows]
 
+    # ---- Document records ----
+
     def upsert_document(self, doc: dict[str, Any], tenant_id: str = "default") -> None:
         now = utc_now()
         with self.connect() as conn:
@@ -355,13 +391,19 @@ class WebDatabase:
                 rows = conn.execute("select * from documents order by updated_at desc").fetchall()
             return [dict(row) for row in rows]
 
-    def add_feedback(self, qa_log_id: int, user_id: int, rating: int, comment: str = "", tenant_id: str = "default") -> dict[str, Any]:
+    # ---- Feedback ----
+
+    def add_feedback(self, qa_log_id: int, user_id: int, rating: int, comment: str = "",
+                     tenant_id: str = "default") -> dict[str, Any]:
         with self.connect() as conn:
             cur = conn.execute(
-                "insert into feedback(qa_log_id, user_id, rating, comment, created_at, tenant_id) values (?, ?, ?, ?, ?, ?)",
+                "insert into feedback(qa_log_id, user_id, rating, comment, created_at, tenant_id) "
+                "values (?, ?, ?, ?, ?, ?)",
                 (qa_log_id, user_id, rating, comment, utc_now(), tenant_id),
             )
             return {"id": cur.lastrowid}
+
+    # ---- Hard Cases & Knowledge Gaps ----
 
     def list_hard_cases(self, limit: int = 100, tenant_id: str | None = None) -> list[dict[str, Any]]:
         with self.connect() as conn:
@@ -423,11 +465,7 @@ class WebDatabase:
                 {
                     "question": question,
                     "count": 0,
-                    "reasons": {
-                        "not_found": 0,
-                        "low_confidence": 0,
-                        "negative_feedback": 0,
-                    },
+                    "reasons": {"not_found": 0, "low_confidence": 0, "negative_feedback": 0},
                     "latest_at": case.get("created_at", ""),
                     "examples": [],
                 },
@@ -443,14 +481,12 @@ class WebDatabase:
             if case.get("created_at", "") > item["latest_at"]:
                 item["latest_at"] = case.get("created_at", "")
             if len(item["examples"]) < 3:
-                item["examples"].append(
-                    {
-                        "id": case.get("id"),
-                        "question": question,
-                        "answer": case.get("answer", ""),
-                        "comment": case.get("comment", ""),
-                    }
-                )
+                item["examples"].append({
+                    "id": case.get("id"),
+                    "question": question,
+                    "answer": case.get("answer", ""),
+                    "comment": case.get("comment", ""),
+                })
 
         gaps = list(grouped.values())
         gaps.sort(key=lambda item: (item["count"], item["latest_at"]), reverse=True)
@@ -502,7 +538,8 @@ class WebDatabase:
             )
             return {"id": tenant_id, "name": name, "config": config or {}, "created_at": now, "updated_at": now}
 
-    def update_tenant(self, tenant_id: str, name: str | None = None, config: dict[str, Any] | None = None) -> dict[str, Any] | None:
+    def update_tenant(self, tenant_id: str, name: str | None = None,
+                      config: dict[str, Any] | None = None) -> dict[str, Any] | None:
         updates = []
         params: list[Any] = []
         if name is not None:
@@ -522,11 +559,9 @@ class WebDatabase:
 
     def delete_tenant(self, tenant_id: str) -> bool:
         with self.connect() as conn:
-            # 级联删除该租户下的所有关联数据
             conn.execute("delete from feedback where tenant_id = ?", (tenant_id,))
             conn.execute("delete from qa_logs where tenant_id = ?", (tenant_id,))
             conn.execute("delete from documents where tenant_id = ?", (tenant_id,))
-            # messages 和 chat_sessions 通过 user_id 关联，需联表删除
             conn.execute(
                 "delete from messages where user_id in (select id from users where tenant_id = ?)",
                 (tenant_id,),
@@ -537,6 +572,39 @@ class WebDatabase:
             )
             conn.execute("delete from users where tenant_id = ?", (tenant_id,))
             cur = conn.execute("delete from tenants where id = ?", (tenant_id,))
+            return cur.rowcount > 0
+
+    # ---- DataSource CRUD ----
+
+    def upsert_data_source(self, tenant_id: str, db_type: str, db_host: str,
+                           db_port: int | None, db_user: str, db_password: str,
+                           db_database: str) -> dict[str, Any]:
+        now = utc_now()
+        with self.connect() as conn:
+            conn.execute(
+                """insert into data_sources(tenant_id, db_type, db_host, db_port, db_user, db_password, db_database, created_at, updated_at)
+                   values (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                   on conflict(tenant_id) do update set
+                       db_type=excluded.db_type, db_host=excluded.db_host, db_port=excluded.db_port,
+                       db_user=excluded.db_user, db_password=excluded.db_password,
+                       db_database=excluded.db_database, updated_at=excluded.updated_at""",
+                (tenant_id, db_type, db_host, db_port, db_user, db_password, db_database, now, now),
+            )
+            row = conn.execute(
+                "select * from data_sources where tenant_id = ?", (tenant_id,)
+            ).fetchone()
+            return dict(row)
+
+    def get_data_source(self, tenant_id: str) -> dict[str, Any] | None:
+        with self.connect() as conn:
+            row = conn.execute(
+                "select * from data_sources where tenant_id = ?", (tenant_id,)
+            ).fetchone()
+            return dict(row) if row else None
+
+    def delete_data_source(self, tenant_id: str) -> bool:
+        with self.connect() as conn:
+            cur = conn.execute("delete from data_sources where tenant_id = ?", (tenant_id,))
             return cur.rowcount > 0
 
 
