@@ -13,11 +13,13 @@ class WorkerResult(TypedDict, total=False):
     total=False 表示非所有字段都必须填充：出错时可能只有 worker + error 两个字段。
     metadata 用于传递辅助信息（如 low_confidence、refinement_count），
     supervisor 和 refiner 节点通过它做路由决策。
+    artifacts 用于传递工具生成的文件产物元数据。
     """
     worker: str
     content: str
     error: str | None
     metadata: dict
+    artifacts: list[dict]
 
 
 class AgentState(TypedDict):
@@ -51,6 +53,9 @@ class AgentState(TypedDict):
     user_profile: dict
     relevant_memories: list[dict]
     session_history: list[dict]
+
+    # 产物：多个并行 Worker 各自 append 产物，operator.add 自动合并
+    artifacts: Annotated[list[dict], operator.add]
 
 
 class DocumentItem(TypedDict, total=False):

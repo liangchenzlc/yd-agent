@@ -4,7 +4,7 @@ from app.agent.tools.file_tool import FileTool
 def test_write_and_read_file(tmp_path):
     tool = FileTool(base_dir=str(tmp_path))
     result = tool.write_file("hello.txt", "Hello, world!")
-    assert "File written" in result
+    assert "文件已保存" in result
 
     content = tool.read_file("hello.txt")
     assert content == "Hello, world!"
@@ -13,7 +13,7 @@ def test_write_and_read_file(tmp_path):
 def test_write_file_creates_subdirectories(tmp_path):
     tool = FileTool(base_dir=str(tmp_path))
     result = tool.write_file("sub/deep/file.txt", "deep content")
-    assert "File written" in result
+    assert "文件已保存" in result
     assert (tmp_path / "sub" / "deep" / "file.txt").exists()
 
 

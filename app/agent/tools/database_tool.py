@@ -16,6 +16,7 @@ class DatabaseTool(BaseTool):
     description = "数据库查询工具"
 
     def __init__(self, db_config: dict | None = None):
+        super().__init__()
         self._db_config = db_config
 
     def _get_engine(self):

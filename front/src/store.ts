@@ -61,6 +61,12 @@ const chatSlice = createSlice({
     addMessage(state, action: PayloadAction<ChatMessage>) {
       state.messages.push(action.payload)
     },
+    setMessageArtifacts(state, action: PayloadAction<{ qaLogId: number; artifacts: ChatMessage['artifacts'] }>) {
+      const target = state.messages.find((message) => message.qaLogId === action.payload.qaLogId)
+      if (target) {
+        target.artifacts = action.payload.artifacts
+      }
+    },
     setMessageFeedback(state, action: PayloadAction<{ qaLogId: number; rating: -1 | 1 }>) {
       const target = state.messages.find((message) => message.qaLogId === action.payload.qaLogId)
       if (target) {
@@ -71,7 +77,7 @@ const chatSlice = createSlice({
 })
 
 export const { setAuth, setUser, clearAuth } = authSlice.actions
-export const { setSessionId, setSessions, setMessages, addMessage, setMessageFeedback } = chatSlice.actions
+export const { setSessionId, setSessions, setMessages, addMessage, setMessageArtifacts, setMessageFeedback } = chatSlice.actions
 
 export const store = configureStore({
   reducer: {

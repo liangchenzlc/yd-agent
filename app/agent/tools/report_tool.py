@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import os
+import re
+import uuid
 from pathlib import Path
 
 from app.agent.tools.base import BaseTool, as_tool
@@ -9,23 +12,65 @@ class ReportTool(BaseTool):
     """图表生成工具集 — 每个图表类型一个独立工具函数。
 
     每个工具函数都有明确的参数签名（区别于单一的 generate_chart(chart_type, data)），
-    让 LLM 能更准确地选择工具并填充参数。支持 matplotlib（PNG）和 plotly（HTML）两种输出。
+    让 LLM 能更准确地选择工具并填充参数。仅支持 matplotlib（PNG）输出。
     """
 
     name = "report"
     description = "图表生成工具集，支持柱状图、折线图、饼图、散点图、直方图"
 
+    def __init__(self, base_dir: str | None = None):
+        super().__init__()
+        self._base_dir = base_dir
+
     def _get_output_dir(self) -> Path:
         from app.config.settings import get_settings
 
         settings = get_settings()
-        base = Path(settings.charts_output_dir)
+        base = Path(self._base_dir or settings.charts_output_dir)
         base.mkdir(parents=True, exist_ok=True)
         return base
 
-    # ---- 内部渲染引擎 ----
+    @staticmethod
+    def _sanitize_filename(filename: str) -> str:
+        """清洗 LLM 生成的文件名，移除路径分隔符和危险字符。"""
+        name = os.path.basename(filename)
+        name = re.sub(r'[<>:"|?*\x00-\x1f]', '_', name)
+        name = name.strip('. ') or f"chart_{uuid.uuid4().hex[:8]}.png"
+        return name
 
-    def _render_matplotlib(self, chart_type: str, data: dict, title: str, output_path: Path) -> str:
+    def _make_unique_path(self, output_dir: Path, filename: str) -> Path:
+        """生成唯一文件路径，避免覆盖已有文件。"""
+        filename = self._sanitize_filename(filename)
+        stem = Path(filename).stem
+        suffix = Path(filename).suffix or ".png"
+        candidate = output_dir / filename
+        counter = 1
+        while candidate.exists():
+            candidate = output_dir / f"{stem}_{counter}{suffix}"
+            counter += 1
+        return candidate
+
+    @staticmethod
+    def _get_mime_type(filename: str) -> str:
+        suffix = Path(filename).suffix.lower()
+        return {
+            ".png": "image/png",
+            ".jpg": "image/jpeg",
+            ".jpeg": "image/jpeg",
+            ".webp": "image/webp",
+        }.get(suffix, "image/png")
+
+    @staticmethod
+    def _get_chart_type(filename: str) -> str:
+        name = Path(filename).stem.lower()
+        for ct in ("bar", "line", "pie", "scatter", "histogram"):
+            if ct in name:
+                return ct
+        return "unknown"
+
+    # ---- 渲染引擎 ----
+
+    def _render_matplotlib(self, chart_type: str, data: dict, title: str, output_path: Path) -> None:
         import matplotlib
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
@@ -58,44 +103,31 @@ class ReportTool(BaseTool):
         fig.tight_layout()
         fig.savefig(str(output_path), dpi=150)
         plt.close(fig)
-        return f"图表已保存: {output_path.resolve()}"
-
-    def _render_plotly(self, chart_type: str, data: dict, title: str, output_path: Path) -> str:
-        import plotly.express as px
-        import pandas as pd
-
-        if chart_type in ("bar", "line", "histogram"):
-            df = pd.DataFrame({"x": data["labels"], "y": data["values"]})
-            if chart_type == "bar":
-                fig = px.bar(df, x="x", y="y", title=title)
-            elif chart_type == "line":
-                fig = px.line(df, x="x", y="y", title=title, markers=True)
-            else:
-                fig = px.histogram(df, x="y", title=title)
-        elif chart_type == "pie":
-            df = pd.DataFrame({"labels": data["labels"], "values": data["values"]})
-            fig = px.pie(df, names="labels", values="values", title=title)
-        elif chart_type == "scatter":
-            df = pd.DataFrame({"x": data["x_values"], "y": data["y_values"]})
-            fig = px.scatter(df, x="x", y="y", title=title)
-        else:
-            return f"错误：不支持的图表类型 '{chart_type}'"
-
-        fig.write_html(str(output_path))
-        return f"交互式图表已保存: {output_path.resolve()}"
 
     def _generate(self, chart_type: str, data: dict, title: str, output_filename: str) -> str:
         output_dir = self._get_output_dir()
-        output_path = output_dir / output_filename
+        output_path = self._make_unique_path(output_dir, output_filename)
 
         try:
-            if output_filename.lower().endswith(".html"):
-                return self._render_plotly(chart_type, data, title, output_path)
-            return self._render_matplotlib(chart_type, data, title, output_path)
+            self._render_matplotlib(chart_type, data, title, output_path)
         except KeyError as e:
             return f"生成 {chart_type} 图表缺少必要参数: {e}"
         except Exception as e:
             return f"生成 {chart_type} 图表失败: {e}"
+
+        # 登记产物（侧信道，供 Worker 提取）
+        actual_filename = output_path.name
+        size_bytes = output_path.stat().st_size
+        self.register_artifact(
+            filepath=str(output_path),
+            filename=actual_filename,
+            mime_type=self._get_mime_type(actual_filename),
+            kind="image",
+            worker="data_analyst",
+            metadata={"chartType": chart_type, "title": title},
+        )
+
+        return "图表已生成"
 
     # ---- 独立工具函数 ----
 

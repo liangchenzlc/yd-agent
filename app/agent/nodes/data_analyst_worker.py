@@ -7,6 +7,7 @@ from app.agent.prompts import DATA_ANALYST_PROMPT, fill_prompt
 from app.agent.state import AgentState
 from app.agent.tools import ToolRegistry, react_loop
 from app.agent.tools.database_tool import DatabaseTool
+from app.agent.tools.report_tool import ReportTool
 from app.web.db import db
 
 logger = logging.getLogger(__name__)
@@ -72,11 +73,12 @@ def data_analyst_worker_node(state: AgentState) -> dict:
                         "content": "当前租户未配置数据源。请联系管理员在管理后台【数据源配置】中添加数据库连接，然后重试。",
                         "error": None,
                         "metadata": {"refinement_count": state.get("refinement_count", 0)},
+                        "artifacts": [],
                     }
                 ]
             }
 
-        # 使用租户数据源创建 DatabaseTool 实例
+        # 使用租户数据源创建独立实例，避免并行 Worker 共享单例导致产物交叉
         db_tool = DatabaseTool(db_config={
             "type": ds["db_type"],
             "host": ds["db_host"],
@@ -85,12 +87,12 @@ def data_analyst_worker_node(state: AgentState) -> dict:
             "password": ds["db_password"],
             "database": ds["db_database"],
         })
+        report_tool = ReportTool()
 
         llm = llm_factory.create_llm()
         feedback = state.get("refinement_feedback", "")
         refinement_context = f"## 上一轮反馈\n{feedback}\n请根据反馈改进数据分析。" if feedback else ""
 
-        report_tool = ToolRegistry.get("report")
         tools = db_tool.get_lc_tools() + report_tool.get_lc_tools()
         tools_description = "\n".join(f"- {t.name}: {t.description}" for t in tools)
 
@@ -106,6 +108,9 @@ def data_analyst_worker_node(state: AgentState) -> dict:
 
         content = react_loop(llm, prompt, tools)
 
+        # 提取工具生成的产物
+        artifacts = report_tool.pop_artifacts()
+
         return {
             "worker_results": [
                 {
@@ -113,6 +118,7 @@ def data_analyst_worker_node(state: AgentState) -> dict:
                     "content": content,
                     "error": None,
                     "metadata": {"refinement_count": state.get("refinement_count", 0)},
+                    "artifacts": artifacts,
                 }
             ]
         }
@@ -125,6 +131,7 @@ def data_analyst_worker_node(state: AgentState) -> dict:
                     "content": "",
                     "error": str(e),
                     "metadata": {"refinement_count": state.get("refinement_count", 0)},
+                    "artifacts": [],
                 }
             ]
         }

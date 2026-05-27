@@ -51,6 +51,9 @@ class Settings(BaseSettings):
     # Chart output (for data_analyst worker)
     charts_output_dir: str = "./data/charts"
 
+    # Artifact output (for chat file/image attachments)
+    artifact_output_dir: str = "./data/artifacts"
+
     # Web
     web_secret_key: str = "change-me-in-production"
 

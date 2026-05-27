@@ -38,6 +38,27 @@ class BaseTool:
     name: str = ""
     description: str = ""
 
+    def __init__(self):
+        self._artifacts: list[dict] = []
+
+    def register_artifact(self, *, filepath: str, filename: str, mime_type: str,
+                          kind: str, worker: str, metadata: dict | None = None):
+        """登记工具生成的文件产物。"""
+        self._artifacts.append({
+            "filepath": filepath,
+            "filename": filename,
+            "mime_type": mime_type,
+            "kind": kind,
+            "worker": worker,
+            "metadata": metadata or {},
+        })
+
+    def pop_artifacts(self) -> list[dict]:
+        """取出并清空已登记的产物列表。"""
+        arts = list(self._artifacts)
+        self._artifacts = []
+        return arts
+
     def get_lc_tools(self) -> list:
         """收集 @as_tool 方法，创建 LangChain StructuredTool 并注册到全局 registry。
 
@@ -186,6 +207,48 @@ class ToolRegistry:
 
 # ---- ReAct 循环 ----
 
+
+import re
+
+
+# 用于识别工具返回文本中的绝对路径（Windows 和 Unix 格式）
+_ABSOLUTE_PATH_RE = re.compile(
+    r'(?:[A-Za-z]:[/\\][^\s,，。！？\n]+|[/\\](?:Users|home|tmp|data|opt|var|srv)[/\\][^\s,，。！？\n]+)'
+)
+
+# 用于匹配 "图表已保存: /path/to/file.png" 或 "文件已保存: /path/to/file.txt" 等
+_PATH_MESSAGE_RE = re.compile(
+    r'(图表已保存|图表已生成|File written|交互式图表已保存|文件已写入|文件已保存|已保存)[^\n]*'
+)
+
+
+def _strip_paths_from_tool_result(text: str) -> str:
+    """将工具返回中的绝对路径替换为友好的用户提示。
+
+    目的：LLM 在最终回答中不应暴露服务端文件路径。
+    如 "图表已保存: C:\...\bar.png" → "图表已生成"
+    """
+    if not text:
+        return text
+
+    # 匹配包含绝对路径的消息行，替换为简洁提示
+    def _replace_path_line(match: re.Match) -> str:
+        line = match.group(0)
+        for keyword in ("图表已保存", "图表已生成", "File written", "交互式图表已保存", "文件已写入", "文件已保存", "已保存"):
+            if keyword in line:
+                return "图表已生成" if "图表" in keyword else "文件已保存"
+        return line
+
+    result = _PATH_MESSAGE_RE.sub(_replace_path_line, text)
+
+    # 兜底：替换所有剩余的绝对路径
+    result = _ABSOLUTE_PATH_RE.sub("", result)
+
+    # 清理多余空行
+    result = re.sub(r'\n{3,}', '\n\n', result).strip()
+    return result
+
+
 def react_loop(
     llm,
     prompt: str,
@@ -219,7 +282,9 @@ def react_loop(
             # 通过全局注册表执行而非直接调用 lc_tool，保持调用入口统一
             # ToolRegistry.execute_tool 负责异常处理、结果格式化、以及统一错误消息格式
             result = ToolRegistry.execute_tool(tc["name"], **tc["args"])
-            messages.append(ToolMessage(content=result, tool_call_id=tc["id"]))
+            # 脱敏：移除绝对路径，LLM 不应看到服务端文件路径
+            clean_result = _strip_paths_from_tool_result(result)
+            messages.append(ToolMessage(content=clean_result, tool_call_id=tc["id"]))
 
     # 超过 max_iterations 未得出最终答案时，返回最后一次 LLM 输出的内容
     # 即使不完整也比抛出异常好 —— 用户至少能看到部分结果
@@ -247,6 +312,7 @@ async def areact_loop(
         messages.append(response)
         for tc in response.tool_calls:
             result = await ToolRegistry.aexecute_tool(tc["name"], **tc["args"])
-            messages.append(ToolMessage(content=result, tool_call_id=tc["id"]))
+            clean_result = _strip_paths_from_tool_result(result)
+            messages.append(ToolMessage(content=clean_result, tool_call_id=tc["id"]))
 
     return response.content if hasattr(response, "content") else str(response)

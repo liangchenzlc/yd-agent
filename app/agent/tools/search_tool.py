@@ -44,6 +44,7 @@ class SearchTool(BaseTool):
     description = "知识库检索工具集，支持混合检索（向量 + 关键词 + 重排序）"
 
     def __init__(self, storage_manager: StorageManager | None = None):
+        super().__init__()
         self.storage_manager = storage_manager
 
     def set_storage_manager(self, storage_manager: StorageManager | None):

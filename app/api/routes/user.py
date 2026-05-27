@@ -1,16 +1,17 @@
 from __future__ import annotations
 
 import json
+import os
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 
 from app.agent.state import AgentState
 from app.runtime import AgentRuntime
 from app.services.documents import list_documents
 from app.web.auth import create_token, get_current_user, verify_password
-from app.web.chat_service import run_chat_turn
+from app.web.chat_service import _collect_and_register_artifacts, run_chat_turn
 from app.web.db import db
 from app.web.schemas import AuthRequest, AuthResponse, ChatRequest, ChatResponse, FeedbackRequest
 
@@ -102,6 +103,7 @@ async def _stream_agent(user: dict, message: str, session_id: str) -> str:
         user_profile={},
         relevant_memories=[],
         session_history=[],
+        artifacts=[],
     )
 
     tenant_id = user.get("tenant_id") or "default"
@@ -111,6 +113,7 @@ async def _stream_agent(user: dict, message: str, session_id: str) -> str:
         worker_assignments: list[str] = []
         worker_results_list: list[dict] = []
         dispatch_reasoning = ""
+        all_artifacts: list[dict] = []
 
         async for chunk in runtime.graph.astream(state, stream_mode="updates"):
             for node_name, node_output in chunk.items():
@@ -125,6 +128,9 @@ async def _stream_agent(user: dict, message: str, session_id: str) -> str:
                 elif node_name == "summary_worker":
                     final_answer = node_output.get("final_answer", "")
                     worker_results_list = node_output.get("worker_results", [])
+                    node_artifacts = node_output.get("artifacts", [])
+                    if node_artifacts:
+                        all_artifacts.extend(node_artifacts)
                     event = {"type": "summary", "content": final_answer}
                 elif node_name == "refiner":
                     needed = node_output.get("refinement_needed", False)
@@ -151,9 +157,18 @@ async def _stream_agent(user: dict, message: str, session_id: str) -> str:
         confidence=None,
         tenant_id=tenant_id,
     )
-    db.add_message(session_id, user["id"], "assistant", final_answer, tenant_id=tenant_id, qa_log_id=qa_log["id"])
+    assistant_msg = db.add_message(
+        session_id, user["id"], "assistant", final_answer, tenant_id=tenant_id, qa_log_id=qa_log["id"],
+    )
 
-    yield f"event: done\ndata: {json.dumps({'type': 'done', 'session_id': session_id, 'qa_log_id': qa_log['id']})}\n\n"
+    # 收集并注册产物
+    graph_result = {"artifacts": all_artifacts}
+    registered_artifacts = _collect_and_register_artifacts(
+        graph_result, session_id, user["id"], tenant_id,
+        assistant_msg["id"], qa_log["id"],
+    )
+
+    yield f"event: done\ndata: {json.dumps({'type': 'done', 'session_id': session_id, 'qa_log_id': qa_log['id'], 'artifacts': registered_artifacts}, ensure_ascii=False)}\n\n"
 
 
 @router.get("/sessions")
@@ -193,7 +208,44 @@ async def documents(user: dict = Depends(get_current_user)) -> list[dict]:
 @router.post("/feedback")
 def feedback(payload: FeedbackRequest, user: dict = Depends(get_current_user)) -> dict:
     return db.add_feedback(payload.qa_log_id, user["id"], payload.rating, payload.comment,
-                           tenant_id=user.get("tenant_id", "default"))
+                           tenant_id=user.get("tenant_id") or "default")
+
+
+@router.get("/artifacts/{artifact_id}")
+async def get_artifact(
+    artifact_id: str,
+    preview: int = Query(default=0, ge=0, le=1),
+    user: dict = Depends(get_current_user),
+):
+    """下载或预览产物文件。preview=1 时浏览器内联展示（适用于图片）。"""
+    art = db.get_artifact(artifact_id)
+    if not art:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="文件不存在或无权限访问")
+
+    # 权限校验：当前用户必须拥有该产物
+    if art["user_id"] != user["id"]:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="文件不存在或无权限访问")
+    if art["tenant_id"] != user.get("tenant_id", "default"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="文件不存在或无权限访问")
+
+    storage_path = art["storage_path"]
+    if not os.path.exists(storage_path):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="文件不存在或已被删除")
+
+    filename = art["filename"]
+    mime_type = art["mime_type"]
+
+    if preview:
+        # 浏览器内联预览（适用于图片）
+        return FileResponse(storage_path, media_type=mime_type, filename=filename)
+    else:
+        # 触发下载
+        return FileResponse(
+            storage_path,
+            media_type="application/octet-stream",
+            filename=filename,
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
 
 
 def _public_user(user: dict) -> dict:

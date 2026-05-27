@@ -15,8 +15,8 @@ def docs_worker_node(state: AgentState) -> dict:
     feedback = state.get("refinement_feedback", "")
     refinement_context = f"## 上一轮反馈\n{feedback}\n请根据反馈改进文档。" if feedback else ""
 
-    # 绑定 FileTool 工具，LLM 自主决定调用 write_file / read_file / list_files
-    file_tool = ToolRegistry.get("file")
+    # 创建独立 FileTool 实例，避免并行 Worker 共享单例导致产物交叉
+    file_tool = FileTool(worker="docs")
     tools = file_tool.get_lc_tools()
     tools_description = "\n".join(f"- {t.name}: {t.description}" for t in tools)
 
@@ -29,6 +29,9 @@ def docs_worker_node(state: AgentState) -> dict:
 
     content = react_loop(llm, prompt, tools)
 
+    # 提取工具生成的产物
+    artifacts = file_tool.pop_artifacts()
+
     return {
         "worker_results": [
             {
@@ -36,6 +39,7 @@ def docs_worker_node(state: AgentState) -> dict:
                 "content": content,
                 "error": None,
                 "metadata": {"refinement_count": state.get("refinement_count", 0)},
+                "artifacts": artifacts,
             }
         ]
     }

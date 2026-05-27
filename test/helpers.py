@@ -22,4 +22,5 @@ def make_initial_state(message: str, user_id: str = "default") -> AgentState:
         user_profile={},
         relevant_memories=[],
         session_history=[],
+        artifacts=[],
     )

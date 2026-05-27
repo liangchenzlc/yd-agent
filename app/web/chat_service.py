@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import logging
+import os
+import shutil
+from pathlib import Path
 from uuid import uuid4
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
@@ -7,8 +11,11 @@ from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 from app.agent.state import AgentState
 from app.agent.stats.usage_tracker import estimate_tokens, track_api_call, track_llm_tokens
 from app.agent.storage.redis_cache import redis_cache
+from app.config.settings import get_settings
 from app.runtime import AgentRuntime
 from app.web.db import db
+
+logger = logging.getLogger(__name__)
 
 SESSION_TTL = 3600  # 1 hour cache for session data
 
@@ -31,6 +38,7 @@ def _state_from_messages(messages: list[BaseMessage], user_id: str, session_id: 
         user_profile={},
         relevant_memories=[],
         session_history=[],
+        artifacts=[],
     )
 
 
@@ -97,7 +105,15 @@ async def run_chat_turn(user: dict, message: str, session_id: str | None = None)
         confidence=_infer_confidence(worker_results),
         tenant_id=tenant_id,
     )
-    db.add_message(resolved_session_id, user["id"], "assistant", answer, tenant_id=tenant_id, qa_log_id=qa_log["id"])
+    assistant_msg = db.add_message(
+        resolved_session_id, user["id"], "assistant", answer, tenant_id=tenant_id, qa_log_id=qa_log["id"],
+    )
+
+    # 收集并注册产物
+    registered_artifacts = _collect_and_register_artifacts(
+        result, resolved_session_id, user["id"], tenant_id,
+        assistant_msg["id"], qa_log["id"],
+    )
 
     # 刷新 Redis 缓存
     updated_history = db.list_messages(resolved_session_id, user["id"], limit=20)
@@ -110,7 +126,111 @@ async def run_chat_turn(user: dict, message: str, session_id: str | None = None)
         "workers_used": workers,
         "dispatch_reasoning": dispatch_reasoning,
         "worker_results": worker_results,
+        "artifacts": registered_artifacts,
     }
+
+
+def _build_artifact_url(artifact_id: str, preview: bool = False) -> str:
+    base = f"/api/artifacts/{artifact_id}"
+    return f"{base}?preview=1" if preview else base
+
+
+def _is_image(kind: str) -> bool:
+    return kind == "image"
+
+
+def artifact_to_dict(art: dict) -> dict:
+    """将数据库中的产物记录转换为前端友好的格式。"""
+    is_img = _is_image(art.get("kind", ""))
+    return {
+        "id": art["id"],
+        "sessionId": art.get("session_id", ""),
+        "messageId": art.get("message_id"),
+        "qaLogId": art.get("qa_log_id"),
+        "tenantId": art.get("tenant_id", ""),
+        "userId": art.get("user_id"),
+        "worker": art.get("worker", ""),
+        "kind": art.get("kind", "file"),
+        "filename": art.get("filename", ""),
+        "mimeType": art.get("mime_type", ""),
+        "sizeBytes": art.get("size_bytes", 0),
+        "url": _build_artifact_url(art["id"]),
+        "previewUrl": _build_artifact_url(art["id"], preview=is_img),
+        "createdAt": art.get("created_at", ""),
+        "metadata": art.get("metadata", {}),
+    }
+
+
+def _collect_and_register_artifacts(
+    result: dict,
+    session_id: str,
+    user_id: int,
+    tenant_id: str,
+    message_id: int,
+    qa_log_id: int,
+) -> list[dict]:
+    """从 graph result 中提取所有产物，复制文件到产物目录，注册到数据库。"""
+    raw_artifacts = result.get("artifacts", [])
+    if not raw_artifacts:
+        return []
+
+    settings = get_settings()
+    artifact_base = Path(settings.artifact_output_dir) / tenant_id / session_id
+    artifact_base.mkdir(parents=True, exist_ok=True)
+
+    registered = []
+    for art in raw_artifacts:
+        artifact_id = f"art_{uuid4().hex[:16]}"
+        src_path = art.get("filepath", "")
+        filename = art.get("filename", "unnamed")
+        kind = art.get("kind", "file")
+        mime_type = art.get("mime_type", "application/octet-stream")
+        worker = art.get("worker", "unknown")
+        metadata = art.get("metadata", {})
+
+        # 源文件检查
+        if not src_path or not os.path.exists(src_path):
+            logger.warning("产物源文件不存在，跳过: %s", src_path)
+            continue
+
+        # 文件大小检查（最大 1GB）
+        try:
+            size_bytes = os.path.getsize(src_path)
+        except OSError:
+            size_bytes = 0
+        if size_bytes > 1024 * 1024 * 1024:
+            logger.warning("产物文件过大 (%d bytes)，跳过: %s", size_bytes, src_path)
+            continue
+
+        # 复制到产物目录
+        dest_filename = f"{artifact_id}_{filename}"
+        dest_path = artifact_base / dest_filename
+        try:
+            shutil.copy2(src_path, dest_path)
+        except Exception as e:
+            logger.error("复制产物文件失败: %s -> %s (%s)", src_path, dest_path, e)
+            continue
+
+        # 注册到数据库
+        artifact_record = {
+            "id": artifact_id,
+            "tenant_id": tenant_id,
+            "user_id": user_id,
+            "session_id": session_id,
+            "message_id": message_id,
+            "qa_log_id": qa_log_id,
+            "worker": worker,
+            "kind": kind,
+            "filename": filename,
+            "mime_type": mime_type,
+            "size_bytes": size_bytes,
+            "storage_path": str(dest_path),
+            "metadata": metadata,
+        }
+        db.add_artifact(artifact_record)
+        registered.append(db.format_artifact(artifact_record))
+
+    return registered
 
 
 def _infer_confidence(worker_results: list[dict]) -> float | None:

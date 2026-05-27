@@ -25,6 +25,7 @@ class ChatResponse(BaseModel):
     workers_used: list[str]
     dispatch_reasoning: str
     worker_results: list[dict]
+    artifacts: list[dict] = []
 
 
 class FeedbackRequest(BaseModel):

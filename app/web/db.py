@@ -134,6 +134,25 @@ class WebDatabase:
                     created_at text not null,
                     updated_at text not null
                 );
+
+                create table if not exists artifacts (
+                    id text primary key,
+                    tenant_id text not null,
+                    user_id integer not null,
+                    session_id text not null,
+                    message_id integer,
+                    qa_log_id integer,
+                    worker text not null,
+                    kind text not null,
+                    filename text not null,
+                    mime_type text not null,
+                    size_bytes integer not null default 0,
+                    storage_path text not null,
+                    created_at text not null,
+                    metadata text not null default '{}',
+                    foreign key(session_id) references chat_sessions(id),
+                    foreign key(user_id) references users(id)
+                );
                 """
             )
             self._ensure_column(conn, "chat_sessions", "tenant_id", "text not null default 'default'")
@@ -263,6 +282,7 @@ class WebDatabase:
 
     def delete_session(self, user_id: int, session_id: str) -> bool:
         with self.connect() as conn:
+            conn.execute("delete from artifacts where session_id = ? and user_id = ?", (session_id, user_id))
             conn.execute("delete from qa_logs where session_id = ? and user_id = ?", (session_id, user_id))
             conn.execute("delete from messages where session_id = ? and user_id = ?", (session_id, user_id))
             cur = conn.execute("delete from chat_sessions where id = ? and user_id = ?", (session_id, user_id))
@@ -300,7 +320,15 @@ class WebDatabase:
                 """,
                 (session_id, user_id, limit),
             ).fetchall()
-            return [dict(row) for row in reversed(rows)]
+            messages = [dict(row) for row in reversed(rows)]
+
+        # 附加产物信息
+        artifact_map = self.list_artifacts_by_session(session_id, user_id)
+        for msg in messages:
+            raw_arts = artifact_map.get(msg["id"], [])
+            msg["artifacts"] = [self.format_artifact(a) for a in raw_arts]
+
+        return messages
 
     def add_qa_log(
         self,
@@ -606,6 +634,122 @@ class WebDatabase:
         with self.connect() as conn:
             cur = conn.execute("delete from data_sources where tenant_id = ?", (tenant_id,))
             return cur.rowcount > 0
+
+    # ---- Artifact CRUD ----
+
+    def add_artifact(self, artifact: dict[str, Any]) -> dict[str, Any]:
+        metadata_json = json.dumps(artifact.get("metadata", {}), ensure_ascii=False)
+        with self.connect() as conn:
+            conn.execute(
+                """insert into artifacts(id, tenant_id, user_id, session_id, message_id, qa_log_id,
+                   worker, kind, filename, mime_type, size_bytes, storage_path, created_at, metadata)
+                   values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    artifact["id"],
+                    artifact["tenant_id"],
+                    artifact["user_id"],
+                    artifact["session_id"],
+                    artifact.get("message_id"),
+                    artifact.get("qa_log_id"),
+                    artifact["worker"],
+                    artifact["kind"],
+                    artifact["filename"],
+                    artifact["mime_type"],
+                    artifact.get("size_bytes", 0),
+                    artifact["storage_path"],
+                    artifact.get("created_at", utc_now()),
+                    metadata_json,
+                ),
+            )
+        return artifact
+
+    def get_artifact(self, artifact_id: str) -> dict[str, Any] | None:
+        with self.connect() as conn:
+            row = conn.execute("select * from artifacts where id = ?", (artifact_id,)).fetchone()
+            if not row:
+                return None
+            result = dict(row)
+            result["metadata"] = json.loads(result.get("metadata", "{}"))
+            return result
+
+    def list_artifacts_by_message(self, message_id: int) -> list[dict[str, Any]]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                "select * from artifacts where message_id = ? order by created_at asc",
+                (message_id,),
+            ).fetchall()
+            result = []
+            for row in rows:
+                d = dict(row)
+                d["metadata"] = json.loads(d.get("metadata", "{}"))
+                result.append(d)
+            return result
+
+    def list_artifacts_by_qa_log(self, qa_log_id: int) -> list[dict[str, Any]]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                "select * from artifacts where qa_log_id = ? order by created_at asc",
+                (qa_log_id,),
+            ).fetchall()
+            result = []
+            for row in rows:
+                d = dict(row)
+                d["metadata"] = json.loads(d.get("metadata", "{}"))
+                result.append(d)
+            return result
+
+    def list_artifacts_by_session(self, session_id: str, user_id: int) -> dict[int, list[dict[str, Any]]]:
+        """返回 session 内所有 message_id → artifacts 的映射。"""
+        with self.connect() as conn:
+            rows = conn.execute(
+                "select * from artifacts where session_id = ? and user_id = ? order by created_at asc",
+                (session_id, user_id),
+            ).fetchall()
+            mapping: dict[int, list[dict[str, Any]]] = {}
+            for row in rows:
+                d = dict(row)
+                d["metadata"] = json.loads(d.get("metadata", "{}"))
+                mid = d.get("message_id")
+                if mid is not None:
+                    mapping.setdefault(mid, []).append(d)
+            return mapping
+
+    def update_artifact_message(self, artifact_id: str, message_id: int, qa_log_id: int | None = None) -> None:
+        with self.connect() as conn:
+            if qa_log_id is not None:
+                conn.execute(
+                    "update artifacts set message_id = ?, qa_log_id = ? where id = ?",
+                    (message_id, qa_log_id, artifact_id),
+                )
+            else:
+                conn.execute(
+                    "update artifacts set message_id = ? where id = ?",
+                    (message_id, artifact_id),
+                )
+
+    @staticmethod
+    def format_artifact(art: dict[str, Any]) -> dict[str, Any]:
+        """将数据库产物记录转换为前端格式。"""
+        kind = art.get("kind", "file")
+        is_image = kind == "image"
+        artifact_id = art["id"]
+        return {
+            "id": artifact_id,
+            "sessionId": art.get("session_id", ""),
+            "messageId": art.get("message_id"),
+            "qaLogId": art.get("qa_log_id"),
+            "tenantId": art.get("tenant_id", ""),
+            "userId": art.get("user_id"),
+            "worker": art.get("worker", ""),
+            "kind": kind,
+            "filename": art.get("filename", ""),
+            "mimeType": art.get("mime_type", ""),
+            "sizeBytes": art.get("size_bytes", 0),
+            "url": f"/api/artifacts/{artifact_id}",
+            "previewUrl": f"/api/artifacts/{artifact_id}?preview=1" if is_image else None,
+            "createdAt": art.get("created_at", ""),
+            "metadata": art.get("metadata", {}),
+        }
 
 
 db = WebDatabase()

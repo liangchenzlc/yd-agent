@@ -49,4 +49,11 @@ def summary_worker_node(state: AgentState) -> dict:
     response = llm.invoke(prompt)
     final_answer = response.content if hasattr(response, "content") else str(response)
 
-    return {"final_answer": final_answer}
+    # 收集当前轮次所有 Worker 的产物，传递到 state
+    all_artifacts = []
+    for r in worker_results:
+        arts = r.get("artifacts", [])
+        if arts:
+            all_artifacts.extend(arts)
+
+    return {"final_answer": final_answer, "artifacts": all_artifacts}

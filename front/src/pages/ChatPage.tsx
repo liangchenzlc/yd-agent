@@ -1,7 +1,7 @@
 import { type FormEvent, type KeyboardEvent, useCallback, useEffect, useRef, useState } from 'react'
 import { useDispatch, useSelector } from 'react-redux'
 import { useNavigate } from 'react-router-dom'
-import { api, chatStreamSSE, type ApiUser, type ChatMessage, type ChatSession } from '../api'
+import { api, chatStreamSSE, type ApiUser, type ChatArtifact, type ChatMessage, type ChatSession } from '../api'
 import {
   addMessage,
   clearAuth,
@@ -26,6 +26,115 @@ function ThumbDownIcon({ filled }: { filled?: boolean }) {
     <svg width="14" height="14" viewBox="0 0 24 24" fill={filled ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <path d="M17 14V2" /><path d="M9 18.12 10 14H4.17a2 2 0 0 1-1.92-2.56l2.33-8A2 2 0 0 1 6.5 2H20a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-2.76a2 2 0 0 0-1.79 1.11L12 22h0a3.13 3.13 0 0 1-3-3.88Z" />
     </svg>
+  )
+}
+
+function DownloadIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" />
+    </svg>
+  )
+}
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`
+}
+
+function getFileIcon(_mimeType: string): string {
+  return '📄'
+}
+
+function ArtifactRenderer({ artifacts }: { artifacts: ChatArtifact[] }) {
+  const [lightboxUrl, setLightboxUrl] = useState<string | null>(null)
+  const [failedIds, setFailedIds] = useState<Set<string>>(new Set())
+
+  if (!artifacts || artifacts.length === 0) return null
+
+  const handleImageError = (id: string) => {
+    setFailedIds((prev) => new Set(prev).add(id))
+  }
+
+  return (
+    <div className="artifacts">
+      {artifacts.map((art) => {
+        const isImage = art.kind === 'image'
+        const isFailed = failedIds.has(art.id)
+
+        if (isImage) {
+          return (
+            <div key={art.id} className="artifact-image-wrap">
+              {isFailed ? (
+                <div className="artifact-error">附件生成失败或文件不可用</div>
+              ) : (
+                <>
+                  <img
+                    className="artifact-image"
+                    src={art.previewUrl || art.url}
+                    alt={art.filename}
+                    onClick={() => setLightboxUrl(art.previewUrl || art.url)}
+                    onError={() => handleImageError(art.id)}
+                    loading="lazy"
+                  />
+                  <div className="artifact-image-actions">
+                    <button
+                      className="artifact-action-btn"
+                      onClick={() => window.open(art.previewUrl || art.url, '_blank')}
+                      type="button"
+                      title="放大预览"
+                    >
+                      放大
+                    </button>
+                    <a
+                      className="artifact-action-btn"
+                      href={art.url}
+                      download={art.filename}
+                      title="下载图片"
+                    >
+                      <DownloadIcon /> 下载
+                    </a>
+                  </div>
+                </>
+              )}
+            </div>
+          )
+        }
+
+        return (
+          <div key={art.id} className="artifact-card">
+            {isFailed ? (
+              <div className="artifact-error">附件生成失败或文件不可用</div>
+            ) : (
+              <>
+                <div className="artifact-card-icon">{getFileIcon(art.mimeType)}</div>
+                <div className="artifact-card-info">
+                  <div className="artifact-card-name">{art.filename}</div>
+                  <div className="artifact-card-meta">
+                    {formatFileSize(art.sizeBytes)} · {art.worker} · {art.mimeType}
+                  </div>
+                </div>
+                <a
+                  className="artifact-card-download"
+                  href={art.url}
+                  download={art.filename}
+                  title="下载文件"
+                >
+                  <DownloadIcon /> 下载
+                </a>
+              </>
+            )}
+          </div>
+        )
+      })}
+      {lightboxUrl && (
+        <div className="lightbox-overlay" onClick={() => setLightboxUrl(null)}>
+          <img className="lightbox-image" src={lightboxUrl} alt="预览" />
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -178,12 +287,12 @@ export function ChatPage() {
         setThinkingStatus('')
         dispatch(addMessage({ role: 'assistant', content: error }))
       },
-      (doneSessionId, qaLogId) => {
+      (doneSessionId, qaLogId, artifacts) => {
         setStreaming(false)
         setThinkingStatus('')
         dispatch(setSessionId(doneSessionId))
         if (accumulatedAnswer) {
-          dispatch(addMessage({ role: 'assistant', content: accumulatedAnswer, qaLogId }))
+          dispatch(addMessage({ role: 'assistant', content: accumulatedAnswer, qaLogId, artifacts }))
         }
         setStreamContent('')
         refreshSessions()
@@ -213,7 +322,6 @@ export function ChatPage() {
 
   function handlePromptClick(prompt: string) {
     setText(prompt)
-    // Focus the textarea
     const textarea = document.querySelector('.composer textarea') as HTMLTextAreaElement | null
     textarea?.focus()
   }
@@ -259,6 +367,9 @@ export function ChatPage() {
           {messages.map((item, index) => (
             <article className={`message ${item.role === 'user' ? 'user' : ''}`} key={item.id ?? index}>
               <div className="stream-reveal">{item.content}</div>
+              {item.artifacts && item.artifacts.length > 0 && (
+                <ArtifactRenderer artifacts={item.artifacts} />
+              )}
               {item.role === 'assistant' && item.qaLogId && (
                 <div className="feedback-bar">
                   <button

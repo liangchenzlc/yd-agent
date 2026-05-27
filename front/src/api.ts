@@ -4,12 +4,31 @@ export type ApiUser = {
   role: string
 }
 
+export type ChatArtifact = {
+  id: string
+  sessionId: string
+  messageId?: number
+  qaLogId?: number
+  tenantId: string
+  userId: number
+  worker: string
+  kind: 'image' | 'file'
+  filename: string
+  mimeType: string
+  sizeBytes: number
+  url: string
+  previewUrl?: string | null
+  createdAt: string
+  metadata?: Record<string, unknown>
+}
+
 export type ChatMessage = {
   id?: number
   role: 'user' | 'assistant'
   content: string
   qaLogId?: number
   feedbackRating?: -1 | 1
+  artifacts?: ChatArtifact[]
 }
 
 export type ChatSession = {
@@ -27,6 +46,7 @@ export type StreamEvent = {
   content?: string
   passed?: boolean
   feedback?: string
+  artifacts?: ChatArtifact[]
 }
 
 export async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
@@ -53,7 +73,7 @@ export function chatStreamSSE(
   sessionId: string,
   onEvent: (event: StreamEvent) => void,
   onError: (error: string) => void,
-  onDone: (sessionId: string, qaLogId?: number) => void,
+  onDone: (sessionId: string, qaLogId?: number, artifacts?: ChatArtifact[]) => void,
 ): () => void {
   const params = new URLSearchParams({ message })
   if (sessionId) params.set('session_id', sessionId)
@@ -95,7 +115,7 @@ export function chatStreamSSE(
           try {
             const parsed = JSON.parse(data)
             if (currentEvent === 'done') {
-              onDone(parsed.session_id || sessionId, parsed.qa_log_id)
+              onDone(parsed.session_id || sessionId, parsed.qa_log_id, parsed.artifacts)
               aborted = true
             } else if (currentEvent === 'worker') {
               onEvent({ ...parsed, type: 'worker' })
